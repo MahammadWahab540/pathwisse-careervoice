@@ -1,0 +1,116 @@
+{
+  "screenshots": [
+    "desktop-landing.png",
+    "desktop-radar.png",
+    "desktop-gaps.png",
+    "desktop-roadmap.png",
+    "desktop-readiness.png",
+    "desktop-benchmark.png",
+    "desktop-evidence.png",
+    "desktop-evidence-submitted.png",
+    "desktop-carousel.png",
+    "mobile-landing.png",
+    "mobile-radar.png",
+    "mobile-gaps.png",
+    "mobile-roadmap.png",
+    "mobile-readiness.png",
+    "mobile-benchmark.png",
+    "mobile-evidence.png",
+    "mobile-evidence-submitted.png",
+    "mobile-carousel.png"
+  ],
+  "consoleErrors": [],
+  "httpErrors": [],
+  "checks": [
+    {
+      "name": "desktop render_skill_radar renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop show_gap_analysis renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop generate_roadmap renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop update_readiness_score renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop show_competency_benchmark renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop request_evidence_upload renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "desktop evidence submission",
+      "pass": true,
+      "detail": "{\"skillName\":\"Testing\",\"url\":\"https://github.com/example/proof\"}"
+    },
+    {
+      "name": "desktop carousel shows latest",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop carousel previous works",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile render_skill_radar renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile show_gap_analysis renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile generate_roadmap renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile update_readiness_score renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile show_competency_benchmark renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile request_evidence_upload renders",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "name": "mobile evidence submission",
+      "pass": true,
+      "detail": "{\"skillName\":\"Testing\",\"url\":\"https://github.com/example/proof\"}"
+    },
+    {
+      "name": "mobile carousel shows latest",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mobile carousel previous works",
+      "pass": false,
+      "detail": ""
+    }
+  ]
+}

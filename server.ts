@@ -372,7 +372,7 @@ app.post('/api/qalam/chat', async (req, res) => {
         followUpQuestion: 'Can you walk me through the exact libraries, model architecture, or database queries you wrote?',
         evidenceStrength: 'Weak',
         needsFollowUp: true,
-        extractedSkills: [{ skill: 'Core Knowledge', level: 'Intermediate', confidence: 60 }],
+        extractedSkills: [],
         toolCalls: [],
       });
     }

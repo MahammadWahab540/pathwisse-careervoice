@@ -1,0 +1,193 @@
+{
+  "checks": [
+    {
+      "name": "desktop landing",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop render_skill_radar",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Skill radar |  | EVIDENCE RADAR |  | Evidence-backed skills | React | 78 |  | Evidence confiden"
+    },
+    {
+      "name": "desktop show_gap_analysis",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Gap analysis |  | GAP MAP |  | Frontend Engineer |  | Testing |  | No integration-test evidence"
+    },
+    {
+      "name": "desktop generate_roadmap",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Career roadmap |  | ADAPTIVE ROADMAP |  | Frontend Engineer |  | Proof foundations |  | Ship a "
+    },
+    {
+      "name": "desktop update_readiness_score",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Readiness score |  | 61 | READINESS | CAREER SIGNAL | +13 |  | Calculated from the submitted "
+    },
+    {
+      "name": "desktop show_competency_benchmark",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Role benchmark |  | ROLE BENCHMARK |  | Frontend Engineer | Verified role threshold | React"
+    },
+    {
+      "name": "desktop request_evidence_upload",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Evidence request |  | PROOF NEEDED |  | Show evidence for Testing |  | Attach a repository,"
+    },
+    {
+      "name": "desktop evidence submission",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop carousel latest",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop carousel previous",
+      "pass": true,
+      "detail": "Verified after 800ms animation settle: active card changed from 2/2 gap analysis to 1/2 skill radar."
+    },
+    {
+      "name": "desktop no horizontal overflow",
+      "pass": true,
+      "detail": "{\"scrollWidth\":1440,\"clientWidth\":1440}"
+    },
+    {
+      "name": "mobile landing",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mobile render_skill_radar",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Skill radar |  | EVIDENCE RADAR |  | Evidence-backed skills | React | 78 |  | Evidence confiden"
+    },
+    {
+      "name": "mobile show_gap_analysis",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Gap analysis |  | GAP MAP |  | Frontend Engineer |  | Testing |  | No integration-test evidence"
+    },
+    {
+      "name": "mobile generate_roadmap",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Career roadmap |  | ADAPTIVE ROADMAP |  | Frontend Engineer |  | Proof foundations |  | Ship a "
+    },
+    {
+      "name": "mobile update_readiness_score",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Readiness score |  | 61 | READINESS | CAREER SIGNAL | +13 |  | Calculated from the submitted "
+    },
+    {
+      "name": "mobile show_competency_benchmark",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Role benchmark |  | ROLE BENCHMARK |  | Frontend Engineer | Verified role threshold | React"
+    },
+    {
+      "name": "mobile request_evidence_upload",
+      "pass": true,
+      "detail": "QALAM ADAPTIVE VIEW |  | Evidence request |  | PROOF NEEDED |  | Show evidence for Testing |  | Attach a repository,"
+    },
+    {
+      "name": "mobile evidence submission",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mobile carousel latest",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mobile carousel previous",
+      "pass": true,
+      "detail": "Verified after 800ms animation settle: active card changed from 2/2 gap analysis to 1/2 skill radar."
+    },
+    {
+      "name": "mobile no horizontal overflow",
+      "pass": true,
+      "detail": "{\"scrollWidth\":390,\"clientWidth\":390}"
+    },
+    {
+      "name": "no fabricated fallback score",
+      "pass": true,
+      "detail": "{\"qalamText\":\"I noted that regarding Frontend Engineer. Tell me about a specific project, API, or system you personally built.\",\"qalamState\":\"CURIOUS\",\"followUpQuestion\":\"Can you walk me through the exact libraries, model architecture, or database queries you wrote?\",\"evidenceStrength\":\"Weak\",\"needsFollowUp\":true,\"extractedSkills\":[],\"toolCalls\":[]}"
+    },
+    {
+      "name": "strict evaluation unavailable without Gemini",
+      "pass": true,
+      "detail": "{\"success\":false,\"error\":\"AI Evaluator service is not initialized (GEMINI_API_KEY required). Strict evaluation requires live model connection.\"}"
+    },
+    {
+      "name": "Live error",
+      "pass": true,
+      "detail": "{\"type\":\"error\",\"error\":\"GEMINI_API_KEY is not configured on server\"}"
+    }
+  ],
+  "consoleErrors": [],
+  "networkErrors": [],
+  "screenshots": [
+    "desktop-landing.png",
+    "desktop-radar.png",
+    "desktop-gaps.png",
+    "desktop-roadmap.png",
+    "desktop-readiness.png",
+    "desktop-benchmark.png",
+    "desktop-evidence.png",
+    "desktop-evidence-submitted.png",
+    "desktop-carousel.png",
+    "mobile-landing.png",
+    "mobile-radar.png",
+    "mobile-gaps.png",
+    "mobile-roadmap.png",
+    "mobile-readiness.png",
+    "mobile-benchmark.png",
+    "mobile-evidence.png",
+    "mobile-evidence-submitted.png",
+    "mobile-carousel.png"
+  ],
+  "pass": true,
+  "notes": [
+    "The no-Gemini chat fallback previously returned a fabricated confidence score; it was removed and reverified with extractedSkills: [].",
+    "Carousel previous assertions pass once the 300ms Framer Motion transition is allowed to settle.",
+    "No application console errors or HTTP 5xx responses were observed during browser card rendering."
+  ],
+  "automatedGates": {
+    "npmTest": "PASS",
+    "npmLint": "PASS",
+    "npmBuild": "PASS"
+  },
+  "apiChecks": {
+    "health": "PASS 200",
+    "streams": "PASS 200",
+    "roles": "PASS 200",
+    "competencyBenchmark": "PASS 200 with verified Supabase benchmark",
+    "qalamChatWeakTyped": "PASS 200; Weak evidence; no extracted score; no tool calls without Gemini",
+    "qalamChatStrongTypedFallback": "PASS 200 explicit fallback; no fabricated score",
+    "qalamEvaluateWithoutGemini": "PASS 503 strict unavailable response",
+    "liveWebSocketWithoutGemini": "PASS error event explicitly reports GEMINI_API_KEY missing",
+    "supabaseProfileSync": "PASS synced=true",
+    "supabaseAuditSave": "PASS synced=true"
+  },
+  "coverage": {
+    "adaptiveTools": "6/6 rendered on desktop and mobile",
+    "evidenceStates": "weak typed fallback, strong typed fallback, evidence request, URL submission",
+    "voice": "Live WebSocket connection/error path verified; real microphone/Gemini audio unavailable without key",
+    "postEvaluation": "Deterministic tool contract covered by npm test; real evaluate response unavailable without key",
+    "reportScreens": "Existing report components type-check and build; full live report traversal blocked by strict 503 without Gemini",
+    "animations": "Adaptive enter/replace transition and carousel verified; evidence success transition verified",
+    "responsive": "390px mobile and 1440px desktop screenshots; no horizontal overflow"
+  },
+  "bugs": [
+    {
+      "severity": "environment",
+      "status": "blocking-real-AI-coverage",
+      "title": "GEMINI_API_KEY is not configured",
+      "reproduction": "POST /api/qalam/evaluate or connect to ws://127.0.0.1:5000/live",
+      "observed": "503 strict evaluation response or explicit Live error event",
+      "expected": "Configure server-side Gemini credentials before testing real model-selected tool calls and report evaluation"
+    }
+  ]
+}

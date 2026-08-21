@@ -1,1 +1,2 @@
 - [Supabase schema compatibility](supabase-schema-compatibility.md) — inspect the connected project’s live schema before applying imported migrations; this project uses UUID-based shared tables.
+- [Playwright runtime dependencies](playwright-runtime-dependencies.md) — local Chromium needs Nix browser libraries installed before headless E2E runs can launch.
