@@ -1,0 +1,33 @@
+I have a design spec for CareerVoice (voice agent for career discovery + skill-gap audit). 
+I need you to check whether the ACTUAL CODEBASE implements this flow, or if it's just a plan/UI mock with no real logic behind it.
+
+Spec reference (CareerVoice__Voice_Agent_Role__User_Flow___Career_Audit_Report_Architecture.md) defines these stages:
+1. Student Discovery (education, branch, interests, skills, projects, work preference etc. collected via voice/chat)
+2. Career Direction Discovery (3-5 role suggestions from profile)
+3. Role Guidance (agent explains each role: responsibilities, skills, tools, day-in-life)
+4. Role Comparison (side-by-side reasoning on fit)
+5. Target Role Confirmation (student locks in one role)
+6. Role Competency Framework (backend-stored skill tree per role: skill, weight, evidence requirements, question bank, rubric, benchmark)
+7. Evidence-Based Audit (open-ended "tell me about a project" style questions, not yes/no)
+8. Adaptive Questioning (follow-up depth changes based on confidence of prior answers)
+9. Skill Signal Extraction (structured signals: skill, evidence text, confidence level pulled from free-text answers)
+10. Evidence Mapping (signal -> competency -> score, stored with traceable evidence)
+11. Skill Gap Calculation (expected vs demonstrated %, weighted by importance/dependency/employability)
+12. Career Readiness Score (overall 0-100 + status label: Ready/Nearly Ready/Developing/Early Stage)
+13. Strengths + Gaps identified separately (not just a deficiency list)
+14. Final Report generation (9-section structure: direction, fit reasoning, readiness score, skill map, strengths, gaps, evidence, priority recommendations, dev plan)
+15. Handoff to Pathwisse Roadmap (skill gap -> Pathwisse skill -> stages -> project -> AI evaluation -> updated readiness)
+16. Explainability chain preserved end-to-end (statement -> evidence -> signal -> assessment -> score -> gap -> action)
+
+For each of the 16 items above, go through the codebase and tell me:
+- IMPLEMENTED (file/function reference) 
+- PARTIALLY IMPLEMENTED (what exists vs what's missing)
+- NOT IMPLEMENTED (spec-only, no code)
+
+Also flag:
+- Any hardcoded/mocked data standing in for what should be dynamic (e.g. fixed skill %, fake report data)
+- Whether skill signal extraction is genuinely parsing free-text answers or just simulating it
+- Whether the competency framework is actually configurable per-role in the backend, or hardcoded for one role only
+- Whether there's a real bridge (API/data contract) between CareerVoice output and Pathwisse Roadmap input, or if that's still conceptual
+
+Give me the result as a gap table: Spec Stage | Status | Evidence/File | What's Missing.
