@@ -4,7 +4,8 @@ import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { CaptionsDisplay } from '../voice/CaptionsDisplay';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
 import { QalamState, CareerRoleTarget, AuditMessage, SkillEvidence } from '../../types';
-import { Mic, MicOff, Send, SkipForward, Sparkles } from 'lucide-react';
+import type { QalamToolCall } from '../../ai/qalamTools';
+import { Mic, MicOff, Send, SkipForward } from 'lucide-react';
 
 interface AdaptiveInterviewStepProps {
   role: CareerRoleTarget;
@@ -15,6 +16,7 @@ interface AdaptiveInterviewStepProps {
     skillsExtracted: SkillEvidence[];
     communicationSample: string;
   }) => void;
+  onToolCalls?: (calls: QalamToolCall[]) => void;
   trackEvent: (eventName: string, metadata?: any) => void;
 }
 
@@ -23,6 +25,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   studentContext,
   firstName,
   onInterviewFinished,
+  onToolCalls,
   trackEvent,
 }) => {
   const [messages, setMessages] = useState<AuditMessage[]>([]);
@@ -143,12 +146,21 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
           history: messages,
           studentContext,
           targetRole: role.title,
+          targetRoleId: role.id,
           currentStage: PROBE_QUESTIONS[currentQuestionIndex].id,
         }),
       });
 
       const data = await res.json();
       setIsAiLoading(false);
+
+      if (Array.isArray(data.toolCalls) && data.toolCalls.length > 0) {
+        onToolCalls?.(data.toolCalls as QalamToolCall[]);
+        trackEvent('qalam_adaptive_ui_called', {
+          tools: data.toolCalls.map((call: QalamToolCall) => call.name),
+          questionIndex: currentQuestionIndex,
+        });
+      }
 
       if (data.extractedSkills && data.extractedSkills.length > 0) {
         // Record signals to Supabase backend
@@ -399,4 +411,3 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     </div>
   );
 };
-

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './lib/firebase';
+import { db } from './lib/firebase';
 
 import { LandingView } from './components/audit/LandingView';
 import { PhoneOtpStep } from './components/audit/PhoneOtpStep';
@@ -22,9 +22,15 @@ import { ShareCardModal } from './components/audit/ShareCardModal';
 import { UpgradeModal } from './components/audit/UpgradeModal';
 import { ReAuditModal } from './components/audit/ReAuditModal';
 import { SupabaseConfigModal } from './components/audit/SupabaseConfigModal';
+import { AdaptiveToolSurface } from './components/adaptive-ui/AdaptiveToolSurface';
 
 import { CareerRole, CONSUMER_CAREER_ROLES } from './data/careerTaxonomy';
 import { PATHWISSE_ROLES, generateDefaultRoadmap } from './data/knowledgeGraph';
+import {
+  type AdaptiveEvidenceSubmission,
+  type QalamToolCall,
+  mergeQalamToolCalls,
+} from './ai/qalamTools';
 import {
   UserIdentity,
   StudentContext,
@@ -77,12 +83,18 @@ export function App() {
   const [auditResult, setAuditResult] = useState<CareerAuditResult | null>(null);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [adaptiveToolCalls, setAdaptiveToolCalls] = useState<QalamToolCall[]>([]);
 
   // Modals
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
   const [isReAuditOpen, setIsReAuditOpen] = useState(false);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
+
+  const handleToolCalls = useCallback((calls: QalamToolCall[]) => {
+    if (!calls.length) return;
+    setAdaptiveToolCalls((existing) => mergeQalamToolCalls(existing, calls));
+  }, []);
 
   // Strict Analytics Event Tracker
   const trackEvent = useCallback(
@@ -131,8 +143,20 @@ export function App() {
     [identity, currentStep, targetRole, selectedRoleForExploration, collegeId]
   );
 
+  const handleAdaptiveEvidence = useCallback((submission: AdaptiveEvidenceSubmission) => {
+    setEvidence((current) => ({
+      ...current,
+      adaptiveEvidence: [...(current.adaptiveEvidence || []), submission],
+    }));
+    trackEvent('adaptive_evidence_attached', {
+      skillName: submission.skillName,
+      hasFile: Boolean(submission.fileName),
+      hasUrl: Boolean(submission.url),
+    });
+  }, [trackEvent]);
+
   // Handle Evaluation & Audit Score Generation
-  const handleGenerateResults = async () => {
+  const handleGenerateResults = async (evidenceOverride?: EvidenceUploads) => {
     setCurrentStep('PROCESSING');
     setIsEvaluating(true);
     setEvaluationError(null);
@@ -143,6 +167,7 @@ export function App() {
       collegeName,
       branch: departmentName,
     };
+    const evidenceForEvaluation = evidenceOverride || evidence;
 
     try {
       const res = await fetch('/api/qalam/evaluate', {
@@ -151,9 +176,11 @@ export function App() {
         body: JSON.stringify({
           studentContext: studentCtx,
           targetRole: targetRole.title,
+          targetRoleId: targetRole.id,
           conversationHistory: interviewMessages,
           communicationSample,
-          evidenceData: evidence,
+          evidenceData: evidenceForEvaluation,
+          phone: identity?.phone || '',
         }),
       });
 
@@ -161,6 +188,10 @@ export function App() {
 
       if (!res.ok || data.success === false) {
         throw new Error(data.error || 'Evaluation engine failed to score audit answers.');
+      }
+
+      if (Array.isArray(data.toolCalls) && data.toolCalls.length > 0) {
+        handleToolCalls(data.toolCalls as QalamToolCall[]);
       }
 
       const fullResult: CareerAuditResult = {
@@ -188,7 +219,7 @@ export function App() {
           phone: identity?.phone || 'anonymous',
           targetRole: targetRole.title,
           auditResult: fullResult,
-          evidenceData: evidence,
+          evidenceData: evidenceForEvaluation,
         }),
       }).catch((e) => console.warn('Supabase audit sync notice:', e));
 
@@ -223,7 +254,9 @@ export function App() {
     setIdentity(null);
     setFirstName('');
     setInterviewMessages([]);
+    setEvidence({});
     setAuditResult(null);
+    setAdaptiveToolCalls([]);
   };
 
   return (
@@ -434,6 +467,7 @@ export function App() {
                 branch: departmentName,
               }}
               firstName={firstName}
+              onToolCalls={handleToolCalls}
               onInterviewFinished={(data) => {
                 setInterviewMessages(data.messages);
                 setSkillsExtracted(data.skillsExtracted);
@@ -447,8 +481,13 @@ export function App() {
           {currentStep === 'EVIDENCE_UPLOAD' && (
             <EvidenceUploadStep
               onComplete={(ev) => {
-                setEvidence(ev);
-                handleGenerateResults();
+                const evidenceWithAdaptiveProof: EvidenceUploads = {
+                  ...evidence,
+                  ...ev,
+                  adaptiveEvidence: evidence.adaptiveEvidence,
+                };
+                setEvidence(evidenceWithAdaptiveProof);
+                handleGenerateResults(evidenceWithAdaptiveProof);
               }}
               trackEvent={trackEvent}
             />
@@ -458,7 +497,7 @@ export function App() {
             <ProcessingSequenceStep
               isEvaluating={isEvaluating}
               error={evaluationError}
-              onRetry={handleGenerateResults}
+              onRetry={() => handleGenerateResults()}
               onFinished={() => setCurrentStep('READINESS_REPORT')}
               trackEvent={trackEvent}
             />
@@ -492,6 +531,14 @@ export function App() {
               trackEvent={trackEvent}
             />
           )}
+
+          <AdaptiveToolSurface
+            calls={adaptiveToolCalls}
+            onSubmitEvidence={handleAdaptiveEvidence}
+            onDismiss={(callId) => {
+              setAdaptiveToolCalls((calls) => calls.filter((call) => call.id !== callId));
+            }}
+          />
         </div>
       </main>
 

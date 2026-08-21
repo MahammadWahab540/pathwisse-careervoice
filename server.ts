@@ -15,6 +15,16 @@ import {
   SEED_ROLE_COMPETENCIES,
   SEED_PRICING_PLANS,
 } from './src/lib/seedData';
+import {
+  QALAM_ADAPTIVE_UI_INSTRUCTION,
+  buildAuditToolCalls,
+} from './src/ai/qalamTools';
+import {
+  QALAM_GEMINI_TOOLS,
+  loadRoleBenchmarkContext,
+  normalizeGeminiFunctionCalls,
+  planAdaptiveToolCalls,
+} from './src/ai/qalamServerTools';
 
 const app = express();
 const PORT = 3000;
@@ -52,9 +62,14 @@ wss.on('connection', async (clientWs: WebSocket) => {
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } },
         },
+        tools: QALAM_GEMINI_TOOLS,
         systemInstruction: `You are Qalam, Pathwisse's interactive AI Career Auditor mascot.
 You conduct real-time interactive voice career audits. Speak in a warm, intelligent, concise tone (2-3 sentences max).
-Probe the student for actual evidence of applied skills, software projects, libraries used, and engineering challenges. Keep responses natural and conversational.`,
+Probe the student for actual evidence of applied skills, software projects, libraries used, and engineering challenges. Keep responses natural and conversational.
+
+${QALAM_ADAPTIVE_UI_INSTRUCTION}
+
+For Live sessions, never call show_competency_benchmark unless a verified benchmark value has been explicitly supplied in the conversation context.`,
         outputAudioTranscription: {},
         inputAudioTranscription: {},
       },
@@ -77,6 +92,11 @@ Probe the student for actual evidence of applied skills, software projects, libr
           const inText = message.serverContent?.inputTranscription?.text;
           if (inText && clientWs.readyState === WebSocket.OPEN) {
             clientWs.send(JSON.stringify({ type: 'inputText', text: inText }));
+          }
+
+          const toolCalls = normalizeGeminiFunctionCalls(message.toolCall?.functionCalls, 'live');
+          if (toolCalls.length > 0 && clientWs.readyState === WebSocket.OPEN) {
+            clientWs.send(JSON.stringify({ type: 'toolCall', calls: toolCalls }));
           }
         },
         onclose: () => {
@@ -103,6 +123,14 @@ Probe the student for actual evidence of applied skills, software projects, libr
         } else if (msg.text) {
           session.sendRealtimeInput({
             text: msg.text,
+          });
+        } else if (msg.toolResult?.id && msg.toolResult?.name) {
+          session.sendToolResponse({
+            functionResponses: [{
+              id: msg.toolResult.id,
+              name: msg.toolResult.name,
+              response: msg.toolResult.result || { rendered: true },
+            }],
           });
         }
       } catch (e) {
@@ -331,6 +359,7 @@ app.post('/api/qalam/chat', async (req, res) => {
       history = [],
       studentContext = {},
       targetRole = 'AI / ML Engineer',
+      targetRoleId,
       currentStage = 'adaptive_questions',
     } = req.body;
 
@@ -343,6 +372,7 @@ app.post('/api/qalam/chat', async (req, res) => {
         evidenceStrength: 'Weak',
         needsFollowUp: true,
         extractedSkills: [{ skill: 'Core Knowledge', level: 'Intermediate', confidence: 60 }],
+        toolCalls: [],
       });
     }
 
@@ -358,7 +388,9 @@ Core Responsibilities:
 2. Probe Weak Evidence: If the student gives vague claims (e.g. "I know Python", "I made a website", "I did machine learning"), detect that evidence is WEAK and formulate a sharp, constructive follow-up question asking for specific libraries, data structures, deployment URLs, or trade-offs.
 3. Keep responses warm, concise, and professional (2-3 sentences max).
 4. Always categorize extracted skills with a realistic proficiency ('Beginner' | 'Intermediate' | 'Advanced') and confidence score (0-100).
-5. Select an appropriate emotion: 'WELCOME', 'LISTENING', 'SPEAKING', 'THINKING', 'CURIOUS', 'SURPRISED', 'ENCOURAGING', 'CELEBRATING'.`;
+5. Select an appropriate emotion: 'WELCOME', 'LISTENING', 'SPEAKING', 'THINKING', 'CURIOUS', 'SURPRISED', 'ENCOURAGING', 'CELEBRATING'.
+
+${QALAM_ADAPTIVE_UI_INSTRUCTION}`;
 
     const promptText = `Student's latest response: "${userText}"
 Conversation history: ${JSON.stringify(history.slice(-6))}
@@ -375,37 +407,47 @@ Respond in valid JSON format matching this schema:
   ]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: promptText,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            qalamText: { type: Type.STRING },
-            qalamState: { type: Type.STRING },
-            evidenceStrength: { type: Type.STRING },
-            needsFollowUp: { type: Type.BOOLEAN },
-            followUpQuestion: { type: Type.STRING },
-            extractedSkills: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  skill: { type: Type.STRING },
-                  level: { type: Type.STRING },
-                  confidence: { type: Type.NUMBER },
+    const [response, toolCalls] = await Promise.all([
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: promptText,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              qalamText: { type: Type.STRING },
+              qalamState: { type: Type.STRING },
+              evidenceStrength: { type: Type.STRING },
+              needsFollowUp: { type: Type.BOOLEAN },
+              followUpQuestion: { type: Type.STRING },
+              extractedSkills: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    skill: { type: Type.STRING },
+                    level: { type: Type.STRING },
+                    confidence: { type: Type.NUMBER },
+                  },
+                  required: ['skill', 'level'],
                 },
-                required: ['skill', 'level'],
               },
             },
+            required: ['qalamText', 'qalamState', 'followUpQuestion'],
           },
-          required: ['qalamText', 'qalamState', 'followUpQuestion'],
         },
-      },
-    });
+      }),
+      planAdaptiveToolCalls(ai, {
+        userText,
+        history,
+        studentContext,
+        targetRole,
+        targetRoleId,
+        currentStage,
+      }),
+    ]);
 
     const parsed = JSON.parse(response.text || '{}');
 
@@ -416,6 +458,7 @@ Respond in valid JSON format matching this schema:
       needsFollowUp: !!parsed.needsFollowUp,
       followUpQuestion: parsed.followUpQuestion || 'What was the most challenging technical roadblock you solved in that project?',
       extractedSkills: parsed.extractedSkills || [],
+      toolCalls,
     });
   } catch (error: any) {
     console.error('Qalam Chat Error:', error);
@@ -426,6 +469,7 @@ Respond in valid JSON format matching this schema:
       needsFollowUp: false,
       followUpQuestion: 'Can you describe the project architecture in detail?',
       extractedSkills: [],
+      toolCalls: [],
       error: error.message,
     });
   }
@@ -439,6 +483,7 @@ app.post('/api/qalam/evaluate', async (req, res) => {
     const {
       studentContext = {},
       targetRole = 'Junior ML Engineer',
+      targetRoleId,
       conversationHistory = [],
       communicationSample = '',
       evidenceData = {},
@@ -454,12 +499,15 @@ app.post('/api/qalam/evaluate', async (req, res) => {
       });
     }
 
+    const benchmarkContext = await loadRoleBenchmarkContext(targetRoleId);
+
     const promptText = `You are Qalam, Pathwisse's AI Career Auditor conducting a strict Career Readiness Audit for the role of "${targetRole}".
 
 Student Academic Background: ${JSON.stringify(studentContext)}
 Conversation Audit Logs: ${JSON.stringify(conversationHistory)}
 60-Second Communication Intro: "${communicationSample}"
 Uploaded Proof & Evidence: ${JSON.stringify(evidenceData)}
+Verified Role Benchmark Context: ${benchmarkContext ? JSON.stringify(benchmarkContext) : 'No verified role benchmark available'}
 Is Re-Audit: ${isReAudit}
 Completed Milestones: ${JSON.stringify(completedMilestones)}
 
@@ -481,6 +529,8 @@ Also calculate 0-100 dimension scores:
 - executionReadiness (Weekly commitment & momentum)
 
 Provide overall weighted Career Readiness Score (0-100) and a concise, constructive 2-3 sentence tone-neutral diagnosis summary.
+Use the verified role benchmark only if one is supplied above. Never invent or infer a role threshold.
+Generate a concise evidence-backed roadmap when the diagnostic gaps support one.
 
 Format output as valid JSON matching this schema:
 {
@@ -518,6 +568,15 @@ Format output as valid JSON matching this schema:
       "recommendedAction": "Actionable Pathwisse step",
       "associatedSkill": "Associated Skill Name",
       "evidenceBasis": "Why this gap was flagged based on evidence"
+    }
+  ],
+  "roadmap": [
+    {
+      "weekNumber": 1,
+      "title": "Evidence-backed milestone",
+      "focusArea": "What the student should be able to prove next",
+      "estimatedHours": 8,
+      "topics": []
     }
   ]
 }`;
@@ -561,10 +620,13 @@ Format output as valid JSON matching this schema:
       }
     }
 
+    const toolCalls = buildAuditToolCalls(parsed, targetRole, benchmarkContext);
+
     res.json({
       success: true,
       auditId,
       ...parsed,
+      toolCalls,
     });
   } catch (error: any) {
     console.error('Qalam Evaluate Error:', error);

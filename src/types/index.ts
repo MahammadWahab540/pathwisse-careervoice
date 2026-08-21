@@ -152,6 +152,12 @@ export interface EvidenceUploads {
   gitHubUrl?: string;
   portfolioUrl?: string;
   internshipDetails?: string;
+  adaptiveEvidence?: Array<{
+    skillName: string;
+    fileName?: string;
+    url?: string;
+    note?: string;
+  }>;
 }
 
 export interface AnalyticsEvent {
