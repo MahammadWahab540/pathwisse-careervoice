@@ -42,6 +42,15 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
     { label: 'Execution Rate', score: result.dimensionScores.executionReadiness },
   ];
 
+  const readinessStatus =
+    result.overallScore >= 85
+      ? 'Ready'
+      : result.overallScore >= 70
+      ? 'Nearly Ready'
+      : result.overallScore >= 45
+      ? 'Developing'
+      : 'Early Stage';
+
   return (
     <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-4 max-w-md mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
       {/* Qalam Mascot */}
@@ -62,7 +71,10 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
             <h2 className="text-base font-bold text-[#0b111e] mt-0.5">Career Readiness Index</h2>
           </div>
 
-          <div
+           <motion.div
+             initial={{ opacity: 0, scale: 0.65, rotate: -12 }}
+             animate={{ opacity: 1, scale: 1, rotate: 0 }}
+             transition={{ type: 'spring', stiffness: 180, damping: 14, delay: 0.2 }}
             className={`w-16 h-16 rounded-2xl border flex flex-col items-center justify-center font-mono font-black shadow-xs ${
               result.overallScore >= 70
                 ? 'text-emerald-700 border-emerald-200 bg-emerald-50'
@@ -70,11 +82,21 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
                 ? 'text-blue-700 border-blue-200 bg-blue-50'
                 : 'text-amber-700 border-amber-200 bg-amber-50'
             }`}
-          >
+           >
             <span className="text-2xl leading-none font-bold">{result.overallScore}</span>
             <span className="text-[9px] text-slate-500 font-semibold mt-0.5">/ 100</span>
-          </div>
+           </motion.div>
         </div>
+
+         <motion.div
+           initial={{ opacity: 0, y: -6 }}
+           animate={{ opacity: 1, y: 0 }}
+           transition={{ delay: 0.55, duration: 0.3 }}
+           className="flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50/60 px-3 py-2"
+         >
+           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Readiness status</span>
+           <span className="text-xs font-bold text-[#1f3861]">{readinessStatus}</span>
+         </motion.div>
 
         {/* Tab Toggle: Index Overview vs 6-Stage Diagnostic Chain */}
         <div className="flex items-center bg-slate-100 p-1 rounded-2xl">
@@ -122,9 +144,12 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
             </h3>
 
             <div className="grid grid-cols-2 gap-2">
-              {dimensions.map((d) => (
-                <div
+               {dimensions.map((d, idx) => (
+                 <motion.div
                   key={d.label}
+                   initial={{ opacity: 0, y: 10 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 0.12 * idx, duration: 0.3 }}
                   className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5"
                 >
                   <div className="flex items-center justify-between text-[11px]">
@@ -141,7 +166,7 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
                       }`}
                     />
                   </div>
-                </div>
+                 </motion.div>
               ))}
             </div>
           </div>

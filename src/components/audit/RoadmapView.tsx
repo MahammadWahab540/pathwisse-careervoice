@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { RoadmapWeek, CareerRoleTarget } from '../../types';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { Calendar, Clock, CheckCircle2, ChevronDown, ChevronUp, Share2, Rocket, PlayCircle, Lock, BookOpen, RotateCcw } from 'lucide-react';
@@ -49,13 +50,17 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
         </div>
 
         {/* Weeks Accordion */}
-        <div className="space-y-2.5">
+         <div className="relative space-y-2.5">
+           <div className="absolute left-[27px] top-4 bottom-4 w-px bg-blue-100" aria-hidden="true" />
           {roadmap.map((week) => {
             const isExpanded = expandedWeek === week.weekNumber;
 
             return (
-              <div
+              <motion.div
                 key={week.weekNumber}
+                initial={{ opacity: 0, x: -14 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: week.weekNumber * 0.08, duration: 0.32, ease: 'easeOut' }}
                 className={`rounded-2xl border transition overflow-hidden ${
                   isExpanded
                     ? 'bg-white border-[#1f3861] shadow-xs'
@@ -137,7 +142,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                     </button>
                   </div>
                 )}
-              </div>
+              </motion.div>
             );
           })}
         </div>

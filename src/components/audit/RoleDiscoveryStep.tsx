@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { CareerRole } from '../../data/careerTaxonomy';
 import { Sparkles, ArrowRight, ShieldCheck, ChevronRight, TrendingUp, DollarSign, Layers, Loader2 } from 'lucide-react';
@@ -92,12 +93,16 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
           </div>
         ) : (
           /* Top 3 Role Cards */
-          <div className="space-y-3">
+           <div className="space-y-3">
             {recommendedRoles.map((role, idx) => {
               const matchScore = idx === 0 ? '98% Match' : idx === 1 ? '92% Match' : '87% Match';
               return (
-                <div
+                <motion.div
                   key={role.id}
+                  initial={{ opacity: 0, y: 18 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.12, duration: 0.35, ease: 'easeOut' }}
+                  whileHover={{ y: -3 }}
                   className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-3 transition hover:border-[#1f3861] group"
                 >
                   <div className="flex items-center justify-between">
@@ -158,7 +163,7 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
                     <span>Deep Dive This Role</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
-                </div>
+                </motion.div>
               );
             })}
           </div>

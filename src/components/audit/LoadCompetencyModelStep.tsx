@@ -65,7 +65,12 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
       />
 
       {/* Main Competency Benchmark Box */}
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4"
+      >
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1">
@@ -89,7 +94,7 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
             Evaluation Dimensions & Weightings
           </h3>
 
-          <div className="space-y-2">
+           <div className="space-y-2">
             {model.coreCompetencies.map((comp, idx) => (
               <motion.div
                 key={comp.skillName}
@@ -108,13 +113,13 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
                   <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-white text-[#1f3861] border border-slate-200">
                     {comp.category}
                   </span>
-                </div>
+         </div>
                 <p className="text-[11px] text-slate-500 font-medium pl-5">
                   {comp.description}
                 </p>
               </motion.div>
             ))}
-          </div>
+       </motion.div>
         </div>
 
         {/* Auditor Notice */}
