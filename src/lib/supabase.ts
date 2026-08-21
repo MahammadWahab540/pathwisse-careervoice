@@ -67,38 +67,17 @@ export interface SupabaseAuditRecord {
  * SQL Schema definition for easy copy/paste into Supabase SQL Editor
  */
 export const SUPABASE_SQL_SCHEMA = `
--- 1. Create Career Streams Table
-CREATE TABLE IF NOT EXISTS public.career_streams (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL,
-  icon_name TEXT NOT NULL,
-  sort_order INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+-- The connected Supabase project already owns career_streams, career_roles,
+-- student_profiles, career_audits, analytics_events, and related tables.
+-- This migration adds only the tables/columns used by this app that are not
+-- present in the shared project schema.
+ALTER TABLE IF EXISTS public.career_audits ADD COLUMN IF NOT EXISTS audit_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS career_audits_audit_id_key
+  ON public.career_audits (audit_id) WHERE audit_id IS NOT NULL;
 
--- 2. Create Career Roles Table
-CREATE TABLE IF NOT EXISTS public.career_roles (
-  id TEXT PRIMARY KEY,
-  stream_id TEXT REFERENCES public.career_streams(id),
-  title TEXT NOT NULL,
-  category TEXT NOT NULL,
-  description TEXT NOT NULL,
-  demand_level TEXT NOT NULL,
-  salary_min_lpa NUMERIC DEFAULT 6.0,
-  salary_max_lpa NUMERIC DEFAULT 20.0,
-  salary_range_display TEXT DEFAULT '₹6L – ₹20L CTC',
-  key_skills JSONB NOT NULL DEFAULT '[]',
-  match_type TEXT DEFAULT 'Strong match',
-  fit_reason TEXT,
-  status TEXT DEFAULT 'published',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 3. Create Role Competencies & Benchmarks Table
 CREATE TABLE IF NOT EXISTS public.role_competencies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  role_id TEXT NOT NULL REFERENCES public.career_roles(id) ON DELETE CASCADE,
+  role_id UUID NOT NULL REFERENCES public.career_roles(id) ON DELETE CASCADE,
   minimum_readiness_benchmark INTEGER DEFAULT 75,
   clarity_weight NUMERIC DEFAULT 0.10,
   technical_weight NUMERIC DEFAULT 0.35,
@@ -111,7 +90,6 @@ CREATE TABLE IF NOT EXISTS public.role_competencies (
   CONSTRAINT unique_role_competency UNIQUE (role_id)
 );
 
--- 4. Create Pricing Plans Table
 CREATE TABLE IF NOT EXISTS public.pricing_plans (
   id TEXT PRIMARY KEY,
   plan_name TEXT NOT NULL,
@@ -125,21 +103,6 @@ CREATE TABLE IF NOT EXISTS public.pricing_plans (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 5. Create Student Profiles Table
-CREATE TABLE IF NOT EXISTS public.student_profiles (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  phone TEXT UNIQUE NOT NULL,
-  first_name TEXT NOT NULL,
-  college_tier TEXT,
-  college_name TEXT,
-  branch TEXT,
-  grad_year TEXT,
-  career_intent TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 6. Create Skill Signals Table (Evidence Probes & Signals)
 CREATE TABLE IF NOT EXISTS public.skill_signals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   audit_id TEXT NOT NULL,
@@ -153,51 +116,9 @@ CREATE TABLE IF NOT EXISTS public.skill_signals (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 7. Create Career Audits Table
-CREATE TABLE IF NOT EXISTS public.career_audits (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  audit_id TEXT UNIQUE NOT NULL,
-  phone TEXT NOT NULL,
-  target_role_id TEXT,
-  target_role_title TEXT NOT NULL,
-  overall_score INTEGER NOT NULL,
-  dimension_scores JSONB NOT NULL,
-  diagnosis_summary TEXT NOT NULL,
-  diagnostic_conclusions JSONB NOT NULL,
-  gaps JSONB NOT NULL,
-  roadmap JSONB NOT NULL,
-  evidence_data JSONB,
-  status TEXT DEFAULT 'COMPLETED',
-  error_message TEXT,
-  iteration INTEGER DEFAULT 1,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 8. Create Analytics Events Table
-CREATE TABLE IF NOT EXISTS public.analytics_events (
-  id TEXT PRIMARY KEY,
-  event_name TEXT NOT NULL,
-  anonymous_id TEXT,
-  session_id TEXT,
-  audit_id TEXT,
-  screen_name TEXT,
-  career_role TEXT,
-  college_id TEXT,
-  campaign_id TEXT,
-  referral_code TEXT,
-  metadata JSONB NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Row Level Security (RLS)
-ALTER TABLE public.career_streams ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.career_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.role_competencies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pricing_plans ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.student_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.skill_signals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.career_audits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 
 -- No public policies are created. All writes go through the server using the
 -- service-role key, which bypasses RLS without exposing that key to clients.
