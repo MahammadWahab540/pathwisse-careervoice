@@ -32,6 +32,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [extractedSkills, setExtractedSkills] = useState<SkillEvidence[]>([]);
   const [communicationSample, setCommunicationSample] = useState('');
+  const [isFollowUpActive, setIsFollowUpActive] = useState(false);
 
   // Fixed 5-Stage Career Readiness Probe
   const PROBE_QUESTIONS = [
@@ -156,9 +157,41 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
             skillName: s.skill,
             claimedLevel: 'Intermediate',
             evidenceLevel: s.level || 'Intermediate',
-            confidenceScore: 80,
+            confidenceScore: s.confidence || (data.evidenceStrength === 'Strong' ? 90 : data.evidenceStrength === 'Weak' ? 45 : 75),
+            confidenceLevel: (data.evidenceStrength === 'Strong' ? 'High' : data.evidenceStrength === 'Weak' ? 'Low' : 'Medium') as 'High' | 'Medium' | 'Low',
+            mappedEvidence: answerText.slice(0, 100),
           })),
         ]);
+      }
+
+      // If weak evidence detected and not already probing follow-up for this question
+      const hasFollowUp = (data.needsFollowUp || data.evidenceStrength === 'Weak') && data.followUpQuestion && !isFollowUpActive;
+
+      if (hasFollowUp) {
+        setIsFollowUpActive(true);
+        const followUpText = `${data.qalamText} ${data.followUpQuestion}`;
+        const newState = 'CURIOUS';
+
+        const newQalamMsg: AuditMessage = {
+          id: `qlm_${Date.now()}`,
+          sender: 'qalam',
+          text: followUpText,
+          timestamp: Date.now(),
+          qalamState: newState,
+        };
+
+        setMessages((prev) => [...prev, newQalamMsg]);
+        setQalamState('SPEAKING');
+
+        speakText(followUpText, () => {
+          setQalamState('LISTENING');
+        });
+        return;
+      }
+
+      // Reset follow-up flag if it was active
+      if (isFollowUpActive) {
+        setIsFollowUpActive(false);
       }
 
       if (currentQuestionIndex < PROBE_QUESTIONS.length - 1) {
@@ -185,7 +218,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
 
         trackEvent(`audit_progress_${nextIdx * 20}`);
       } else {
-        const finalQalamText = `${data.qalamText} Excellent responses, ${firstName || 'friend'}! I have captured your career signals. Now let's review your project evidence.`;
+        const finalQalamText = `${data.qalamText} Excellent work, ${firstName || 'friend'}! I have mapped your skill signals and baseline confidence. Let's inspect your project evidence next.`;
         setQalamState('CELEBRATING');
 
         speakText(finalQalamText, () => {

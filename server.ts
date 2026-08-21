@@ -4,6 +4,7 @@ import path from 'path';
 import { GoogleGenAI, Type, Modality, LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
+import { getSupabase, SUPABASE_SQL_SCHEMA } from './src/lib/supabase';
 
 const app = express();
 const PORT = 3000;
@@ -195,7 +196,7 @@ app.get('/api/roles', (req, res) => {
   res.json(allRoles);
 });
 
-// API Endpoint: Qalam AI Chat & Adaptive Probing
+// API Endpoint: Qalam AI Chat & Adaptive Probing with Weak Evidence Detection
 app.post('/api/qalam/chat', async (req, res) => {
   try {
     const {
@@ -209,37 +210,41 @@ app.post('/api/qalam/chat', async (req, res) => {
     if (!ai) {
       // Graceful fallback if GEMINI_API_KEY is not set
       return res.json({
-        qalamText: `I heard you! Regarding ${targetRole}, tell me about a project or problem you solved recently using your skills.`,
+        qalamText: `I noted that regarding ${targetRole}. Tell me about a specific project, API, or system you personally built.`,
         qalamState: 'CURIOUS',
-        followUpQuestion: 'What was the trickiest part of that build?',
-        extractedSkills: [{ skill: 'Problem Solving', level: 'Intermediate' }],
+        followUpQuestion: 'Can you walk me through the exact libraries, model architecture, or database queries you wrote?',
+        evidenceStrength: 'Weak',
+        needsFollowUp: true,
+        extractedSkills: [{ skill: 'Core Knowledge', level: 'Intermediate', confidence: 60 }],
       });
     }
 
-    const systemInstruction = `You are Qalam, Pathwisse's AI Career Auditor.
-Your personality is calm, intelligent, encouraging, highly perceptive, and constructive. You are NOT a generic assistant or chatbot; you act like a top-tier tech mentor and engineering interviewer conducting a 1-on-1 career audit.
+    const systemInstruction = `You are Qalam, Pathwisse's elite Career Guide and Career Auditor for engineering students.
+You are NOT a generic assistant, generic chatbot, or supportive cheerleader. You act like a top-tier Principal Engineer and technical interviewer conducting a rigorous 1-on-1 career audit.
 
-Target Role: ${targetRole}
-Student Context: ${JSON.stringify(studentContext)}
-Current Stage: ${currentStage}
+Role Being Audited: ${targetRole}
+Student Academic Context: ${JSON.stringify(studentContext)}
+Current Audit Stage: ${currentStage}
 
-Rules for Qalam:
-1. Speak in concise, warm, natural sentences (2-3 sentences max per turn).
-2. Never give fake praise or dry lists. Always probe for actual evidence of applied skills rather than asking them to self-rate from 1-10.
-3. If they mention a skill (e.g., Python, SQL, React), ask what they actually built with it or what libraries/tools they used.
-4. Select one appropriate Qalam emotion state from: 'WELCOME', 'LISTENING', 'SPEAKING', 'THINKING', 'CURIOUS', 'SURPRISED', 'ENCOURAGING', 'CELEBRATING'.
-5. Always maintain focus on diagnosing career readiness for Pathwisse's roadmap.`;
+Core Responsibilities:
+1. Act as a discerning Career Auditor: Verify claimed skills against demonstrable proof of work.
+2. Probe Weak Evidence: If the student gives vague claims (e.g. "I know Python", "I made a website", "I did machine learning"), detect that evidence is WEAK and formulate a sharp, constructive follow-up question asking for specific libraries, data structures, deployment URLs, or trade-offs.
+3. Keep responses warm, concise, and professional (2-3 sentences max).
+4. Always categorize extracted skills with a realistic proficiency ('Beginner' | 'Intermediate' | 'Advanced') and confidence score (0-100).
+5. Select an appropriate emotion: 'WELCOME', 'LISTENING', 'SPEAKING', 'THINKING', 'CURIOUS', 'SURPRISED', 'ENCOURAGING', 'CELEBRATING'.`;
 
     const promptText = `Student's latest response: "${userText}"
 Conversation history: ${JSON.stringify(history.slice(-6))}
 
 Respond in valid JSON format matching this schema:
 {
-  "qalamText": "What Qalam says back to the student",
-  "qalamState": "CURIOUS" | "ENCOURAGING" | "SPEAKING" | "SURPRISED" | "CELEBRATING",
-  "followUpQuestion": "A targeted follow-up question probing for technical or project evidence",
+  "qalamText": "Qalam's immediate evaluation and spoken response to the student",
+  "qalamState": "CURIOUS" | "ENCOURAGING" | "SPEAKING" | "SURPRISED" | "CELEBRATING" | "THINKING",
+  "evidenceStrength": "Strong" | "Moderate" | "Weak" | "None",
+  "needsFollowUp": boolean,
+  "followUpQuestion": "A targeted follow-up probing for concrete technical code/project evidence if the previous claim lacked depth",
   "extractedSkills": [
-    { "skill": "Skill Name", "level": "Beginner" | "Intermediate" | "Advanced" }
+    { "skill": "Skill Name", "level": "Beginner" | "Intermediate" | "Advanced", "confidence": number }
   ]
 }`;
 
@@ -254,6 +259,8 @@ Respond in valid JSON format matching this schema:
           properties: {
             qalamText: { type: Type.STRING },
             qalamState: { type: Type.STRING },
+            evidenceStrength: { type: Type.STRING },
+            needsFollowUp: { type: Type.BOOLEAN },
             followUpQuestion: { type: Type.STRING },
             extractedSkills: {
               type: Type.ARRAY,
@@ -262,6 +269,7 @@ Respond in valid JSON format matching this schema:
                 properties: {
                   skill: { type: Type.STRING },
                   level: { type: Type.STRING },
+                  confidence: { type: Type.NUMBER },
                 },
                 required: ['skill', 'level'],
               },
@@ -275,22 +283,29 @@ Respond in valid JSON format matching this schema:
     const parsed = JSON.parse(response.text || '{}');
 
     res.json({
-      qalamText: parsed.qalamText || 'That gives me great insight into your baseline.',
+      qalamText: parsed.qalamText || 'That provides useful baseline insight.',
       qalamState: parsed.qalamState || 'CURIOUS',
-      followUpQuestion: parsed.followUpQuestion || 'What project are you most proud of building so far?',
+      evidenceStrength: parsed.evidenceStrength || 'Moderate',
+      needsFollowUp: !!parsed.needsFollowUp,
+      followUpQuestion: parsed.followUpQuestion || 'What was the most challenging technical roadblock you solved in that project?',
       extractedSkills: parsed.extractedSkills || [],
     });
   } catch (error: any) {
     console.error('Qalam Chat Error:', error);
     res.status(500).json({
-      qalamText: "That's helpful context. Let's explore your practical project experience next.",
+      qalamText: "That's helpful context. Let's dig into your applied technical implementation.",
       qalamState: 'CURIOUS',
+      evidenceStrength: 'Moderate',
+      needsFollowUp: false,
+      followUpQuestion: 'Can you describe the project architecture in detail?',
+      extractedSkills: [],
       error: error.message,
     });
   }
 });
 
-// API Endpoint: Qalam Comprehensive Career Evaluation & Roadmap Generation
+// API Endpoint: Qalam Comprehensive Career Evaluation & Diagnostic Chain Generation
+// Every report conclusion MUST follow: Student Answer → Evidence → Skill → Score → Gap → Recommended Action.
 app.post('/api/qalam/evaluate', async (req, res) => {
   try {
     const {
@@ -299,93 +314,163 @@ app.post('/api/qalam/evaluate', async (req, res) => {
       conversationHistory = [],
       communicationSample = '',
       evidenceData = {},
+      isReAudit = false,
+      completedMilestones = [],
     } = req.body;
 
     if (!ai) {
       // Deterministic fallback response if AI key is pending
+      const baseScore = isReAudit ? 62 : 44;
       return res.json({
-        overallScore: 43,
+        overallScore: baseScore,
         dimensionScores: {
-          careerClarity: 68,
-          technicalReadiness: 41,
-          projectReadiness: 29,
-          communication: 55,
-          placementReadiness: 37,
-          executionReadiness: 50,
+          careerClarity: isReAudit ? 78 : 68,
+          technicalReadiness: isReAudit ? 58 : 42,
+          projectReadiness: isReAudit ? 52 : 30,
+          communication: 60,
+          placementReadiness: isReAudit ? 54 : 38,
+          executionReadiness: 65,
         },
-        diagnosisSummary:
-          "You're currently strongest in core technical concepts. The main blocker holding you back from looking like a competitive " +
-          targetRole +
-          " candidate is proof of deployed projects and structured GitHub evidence.",
+        diagnosisSummary: isReAudit
+          ? `Substantial progress detected for ${targetRole}! You have bridged key gaps in core architecture. Next milestone: deploy a live end-to-end containerized service.`
+          : `You demonstrate solid theoretical awareness for ${targetRole}, but your biggest hireability blocker is a lack of publicly verifiable deployed projects and GitHub evidence.`,
+        diagnosticConclusions: [
+          {
+            id: 'diag_1',
+            skillName: 'Production Machine Learning & Model Deployment',
+            studentAnswerSnippet: 'Explained training models in Jupyter notebooks with basic dataset split.',
+            evidenceVerified: evidenceData?.gitHubUrl ? 'GitHub repository provided; missing automated tests & Dockerfile' : 'No live demo link or Docker packaging provided',
+            evidenceStrength: 'Weak',
+            score: 38,
+            confidenceScore: 85,
+            confidenceLevel: 'High',
+            gapSeverity: 'RED',
+            gapDescription: 'Models exist only locally in notebooks without containerized APIs or cloud endpoints.',
+            recommendedAction: 'Build and deploy a FastAPI inference endpoint on Cloud Run or Vercel.',
+          },
+          {
+            id: 'diag_2',
+            skillName: 'Mathematical Foundations & Optimization',
+            studentAnswerSnippet: 'Mentioned using standard library loss functions without custom loss derivation.',
+            evidenceVerified: 'Interview response showed familiarity with gradient descent concepts.',
+            evidenceStrength: 'Moderate',
+            score: 55,
+            confidenceScore: 80,
+            confidenceLevel: 'High',
+            gapSeverity: 'ORANGE',
+            gapDescription: 'Understands intuition but lacks mathematical rigor in backpropagation & metric optimization.',
+            recommendedAction: 'Complete Pathwisse Module 1 on Applied Linear Algebra & Custom Loss Functions.',
+          },
+          {
+            id: 'diag_3',
+            skillName: 'Engineering Rigor & Documentation',
+            studentAnswerSnippet: 'Mentioned basic Git commits without CI/CD or architectural README.',
+            evidenceVerified: evidenceData?.gitHubUrl ? 'GitHub profile attached' : 'No repo URL attached',
+            evidenceStrength: 'Moderate',
+            score: 48,
+            confidenceScore: 75,
+            confidenceLevel: 'Medium',
+            gapSeverity: 'ORANGE',
+            gapDescription: 'Repositories lack structured README benchmarks, architecture diagrams, and environment isolation.',
+            recommendedAction: 'Upgrade top 2 repositories with production-grade documentation and system architecture diagrams.',
+          }
+        ],
         gaps: [
           {
             id: 'gap_1',
-            title: 'No Deployed Production Project',
+            title: 'No Live Deployed Production Project',
             severity: 'RED',
-            description: 'Lacks a publicly accessible live API or web application showing end-to-end implementation.',
-            recommendedAction: 'Build and deploy a containerized microservice to Cloud Run/Vercel.',
+            description: 'Lacks a publicly accessible live API or web application demonstrating end-to-end deployment.',
+            recommendedAction: 'Build and deploy a containerized microservice on Cloud Run/Vercel.',
+            associatedSkill: 'Production Machine Learning & Model Deployment',
+            evidenceBasis: 'Notebook code without production API endpoint',
           },
           {
             id: 'gap_2',
-            title: 'Statistical & Applied Foundation Gap',
-            severity: 'RED',
-            description: 'Requires stronger mathematical rigor in optimization, cross-validation, and metrics.',
+            title: 'Mathematical Optimization & Statistical Depth',
+            severity: 'ORANGE',
+            description: 'Requires deeper grounding in loss derivation, regularization, and mathematical optimization.',
             recommendedAction: 'Complete Pathwisse Module 1 on Applied Math & Statistics.',
+            associatedSkill: 'Mathematical Foundations & Optimization',
+            evidenceBasis: 'Conceptual explanation without quantitative formulation',
           },
           {
             id: 'gap_3',
-            title: 'GitHub & Evidence Portfolio Weakness',
+            title: 'Public GitHub Code Rigor & Documentation',
             severity: 'ORANGE',
-            description: 'Repository structure lacks clean documentation, tests, and architectural diagrams.',
+            description: 'Repositories need clean environment locks, test suites, and architectural diagrams.',
             recommendedAction: 'Restructure top 2 repositories with production READMEs.',
+            associatedSkill: 'Engineering Rigor & Documentation',
+            evidenceBasis: 'Unstructured repository commit history',
           },
         ],
       });
     }
 
-    const promptText = `Analyze this student's career audit session for the role of "${targetRole}".
+    const promptText = `You are Qalam, Pathwisse's AI Career Auditor conducting a strict Career Readiness Audit for the role of "${targetRole}".
 
 Student Background: ${JSON.stringify(studentContext)}
 Conversation Audit Logs: ${JSON.stringify(conversationHistory)}
 60-Second Communication Intro: "${communicationSample}"
-Evidence Uploaded: ${JSON.stringify(evidenceData)}
+Uploaded Proof & Evidence: ${JSON.stringify(evidenceData)}
+Is Re-Audit: ${isReAudit}
+Completed Milestones: ${JSON.stringify(completedMilestones)}
 
-Provide a rigorous, constructive career audit evaluation.
-Calculate realistic 0-100 scores across 6 dimensions:
-1. careerClarity (Does the student understand what the role actually entails day-to-day?)
-2. technicalReadiness (Do they possess core technical/theoretical knowledge?)
-3. projectReadiness (Have they built and deployed real applied projects?)
-4. communication (Structure, clarity, confidence, filler words, technical articulation)
-5. placementReadiness (Resume, GitHub, portfolio, interview preparedness)
-6. executionReadiness (Discipline, consistency, time availability)
+AUDIT DIRECTIVE:
+Act as a rigorous Career Guide and Career Auditor. For every major skill tested, you MUST generate a complete diagnostic conclusion following this exact 6-stage chain:
+1. Student Answer (Student's verbatim claim or interview answer snippet)
+2. Evidence Verified (What concrete proof was found in code/demo/resume vs missing)
+3. Skill (The core engineering competency)
+4. Score & Confidence (Score 0-100, Confidence Score 0-100, Confidence Level 'High' | 'Medium' | 'Low')
+5. Identified Gap (Severity 'RED' | 'ORANGE' | 'GREEN', Description)
+6. Recommended Action (Specific Pathwisse milestone fix)
 
-Calculate the overall weighted Career Readiness Score (0-100).
-Identify 3 to 5 specific Gaps with severity:
-- RED: Critical blockers preventing interview calls.
-- ORANGE: Moderate gaps needing improvement.
-- GREEN: Strong foundational strengths to highlight.
+Also calculate 0-100 dimension scores:
+- careerClarity (Role understanding)
+- technicalReadiness (Depth of core knowledge)
+- projectReadiness (Proof of real built/deployed systems)
+- communication (Clarity, structure, technical defense)
+- placementReadiness (Resume/GitHub proof)
+- executionReadiness (Weekly commitment & momentum)
 
-Provide a constructive 2-3 sentence tone-neutral diagnosis summary.
+Provide overall weighted Career Readiness Score (0-100) and a concise, constructive 2-3 sentence tone-neutral diagnosis summary.
 
-Format output as JSON:
+Format output as valid JSON matching this schema:
 {
-  "overallScore": 43,
+  "overallScore": 44,
   "dimensionScores": {
     "careerClarity": 68,
-    "technicalReadiness": 41,
-    "projectReadiness": 29,
-    "communication": 55,
-    "placementReadiness": 37,
-    "executionReadiness": 50
+    "technicalReadiness": 42,
+    "projectReadiness": 30,
+    "communication": 60,
+    "placementReadiness": 38,
+    "executionReadiness": 65
   },
-  "diagnosisSummary": "You are currently strongest in...",
+  "diagnosisSummary": "Constructive 2-3 sentence summary...",
+  "diagnosticConclusions": [
+    {
+      "id": "diag_1",
+      "skillName": "Name of Skill",
+      "studentAnswerSnippet": "What the student said in audit...",
+      "evidenceVerified": "What concrete evidence was verified or missing...",
+      "evidenceStrength": "Strong" | "Moderate" | "Weak" | "None",
+      "score": 42,
+      "confidenceScore": 85,
+      "confidenceLevel": "High" | "Medium" | "Low",
+      "gapSeverity": "RED" | "ORANGE" | "GREEN",
+      "gapDescription": "Specific gap holding them back...",
+      "recommendedAction": "Concrete Pathwisse action step..."
+    }
+  ],
   "gaps": [
     {
       "id": "gap_1",
       "title": "Title of Gap",
-      "severity": "RED",
+      "severity": "RED" | "ORANGE" | "GREEN",
       "description": "Why this holds them back",
-      "recommendedAction": "Actionable Pathwisse step"
+      "recommendedAction": "Actionable Pathwisse step",
+      "associatedSkill": "Associated Skill Name",
+      "evidenceBasis": "Why this gap was flagged based on evidence"
     }
   ]
 }`;
@@ -427,6 +512,129 @@ app.post('/api/analytics/track', (req, res) => {
   }
 
   res.json({ success: true, eventId: enrichedEvent.id });
+});
+
+// API Endpoint: Supabase BaaS Status & Schema Check
+app.get('/api/supabase/status', async (req, res) => {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.json({
+      configured: false,
+      message: 'SUPABASE_URL and SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are not configured yet in environment variables.',
+      schemaSql: SUPABASE_SQL_SCHEMA,
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.from('student_profiles').select('id').limit(1);
+    if (error) {
+      return res.json({
+        configured: true,
+        connected: false,
+        message: `Connected to Supabase project, but table check returned: ${error.message}. Make sure to execute the schema in Supabase SQL editor.`,
+        schemaSql: SUPABASE_SQL_SCHEMA,
+      });
+    }
+
+    return res.json({
+      configured: true,
+      connected: true,
+      message: 'Successfully connected to Supabase BaaS! Tables are active and ready.',
+      schemaSql: SUPABASE_SQL_SCHEMA,
+    });
+  } catch (err: any) {
+    return res.json({
+      configured: true,
+      connected: false,
+      message: err.message,
+      schemaSql: SUPABASE_SQL_SCHEMA,
+    });
+  }
+});
+
+// API Endpoint: Sync Student Profile with Supabase BaaS
+app.post('/api/supabase/profile/sync', async (req, res) => {
+  const supabase = getSupabase();
+  const profileData = req.body;
+
+  if (!supabase) {
+    return res.json({
+      synced: false,
+      fallback: 'local_storage',
+      message: 'Supabase credentials not set, profile saved in local memory.',
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('student_profiles')
+      .upsert(
+        {
+          phone: profileData.phone,
+          first_name: profileData.firstName || profileData.first_name,
+          college_tier: profileData.collegeTier || profileData.college_tier,
+          college_name: profileData.collegeName || profileData.college_name,
+          branch: profileData.branch,
+          grad_year: profileData.gradYear || profileData.grad_year,
+          career_intent: profileData.careerIntent || profileData.career_intent,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'phone' }
+      )
+      .select();
+
+    if (error) {
+      console.error('Supabase profile upsert error:', error.message);
+      return res.status(400).json({ synced: false, error: error.message });
+    }
+
+    return res.json({ synced: true, profile: data?.[0] });
+  } catch (err: any) {
+    console.error('Supabase sync exception:', err);
+    return res.status(500).json({ synced: false, error: err.message });
+  }
+});
+
+// API Endpoint: Save Career Audit Result to Supabase BaaS
+app.post('/api/supabase/audit/save', async (req, res) => {
+  const supabase = getSupabase();
+  const { phone, targetRole, auditResult, evidenceData } = req.body;
+
+  if (!supabase) {
+    return res.json({
+      synced: false,
+      fallback: 'local_storage',
+      message: 'Supabase credentials not set, audit saved in client state.',
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('career_audits')
+      .insert({
+        phone: phone || 'anonymous',
+        target_role: targetRole || 'Software Engineer',
+        overall_score: auditResult?.overallScore || 0,
+        dimension_scores: auditResult?.dimensionScores || {},
+        diagnosis_summary: auditResult?.diagnosisSummary || '',
+        diagnostic_conclusions: auditResult?.diagnosticConclusions || [],
+        gaps: auditResult?.gaps || [],
+        roadmap: auditResult?.roadmap || [],
+        evidence_data: evidenceData || {},
+        iteration: auditResult?.auditIteration || 1,
+      })
+      .select();
+
+    if (error) {
+      console.error('Supabase audit insert error:', error.message);
+      return res.status(400).json({ synced: false, error: error.message });
+    }
+
+    return res.json({ synced: true, auditRecordId: data?.[0]?.id });
+  } catch (err: any) {
+    console.error('Supabase audit save exception:', err);
+    return res.status(500).json({ synced: false, error: err.message });
+  }
 });
 
 // API Endpoint: Analytics Dashboard Metrics

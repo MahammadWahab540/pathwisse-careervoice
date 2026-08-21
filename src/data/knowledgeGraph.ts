@@ -1,4 +1,4 @@
-import { CareerRoleTarget, RoadmapWeek } from '../types';
+import { CareerRoleTarget, RoadmapWeek, RoleCompetencyModel } from '../types';
 
 export interface PathwisseSkill {
   id: string;
@@ -403,3 +403,166 @@ export function generateDefaultRoadmap(roleId: string, roleTitle: string): Roadm
     }
   ];
 }
+
+export function getRoleCompetencyModel(roleId: string, roleTitle: string): RoleCompetencyModel {
+  const normalizedId = roleId.toLowerCase();
+  
+  if (normalizedId.includes('ml') || normalizedId.includes('ai')) {
+    return {
+      roleId,
+      roleTitle: roleTitle || 'AI / ML Engineer',
+      description: 'Production Machine Learning, LLM Fine-tuning, and Deep Learning Systems engineering benchmark.',
+      minimumReadinessBenchmark: 72,
+      coreCompetencies: [
+        {
+          skillName: 'Mathematical Foundations & Calculus',
+          category: 'Core Theory',
+          expectedLevel: 'Intermediate',
+          description: 'Gradients, loss optimization, matrix transformations, and statistical evaluation.',
+          weight: 20,
+        },
+        {
+          skillName: 'PyTorch / TensorFlow Model Architecture',
+          category: 'Applied Engineering',
+          expectedLevel: 'Intermediate',
+          description: 'Custom dataset pipelines, model training loops, transfer learning, and evaluation metrics.',
+          weight: 25,
+        },
+        {
+          skillName: 'FastAPI / Containerized Inference',
+          category: 'Tools & Infrastructure',
+          expectedLevel: 'Intermediate',
+          description: 'Packaging trained models into low-latency REST endpoints with Docker.',
+          weight: 25,
+        },
+        {
+          skillName: 'Public GitHub Code Rigor & Reproducibility',
+          category: 'Problem Solving',
+          expectedLevel: 'Intermediate',
+          description: 'Clean repository documentation, requirements.txt/environment locks, and verified benchmarks.',
+          weight: 15,
+        },
+        {
+          skillName: 'Technical Articulation & System Defense',
+          category: 'Problem Solving',
+          expectedLevel: 'Intermediate',
+          description: 'Clearly explaining architectural trade-offs, bottleneck debugging, and metrics in 60s.',
+          weight: 15,
+        },
+      ],
+      evaluationCriteria: {
+        clarityWeight: 15,
+        technicalWeight: 35,
+        projectWeight: 25,
+        communicationWeight: 15,
+        executionWeight: 10,
+      },
+    };
+  }
+
+  if (normalizedId.includes('full_stack') || normalizedId.includes('software')) {
+    return {
+      roleId,
+      roleTitle: roleTitle || 'Full Stack Software Engineer',
+      description: 'End-to-end web engineering, distributed APIs, and performant user interface architecture benchmark.',
+      minimumReadinessBenchmark: 70,
+      coreCompetencies: [
+        {
+          skillName: 'Data Structures & Algorithms',
+          category: 'Core Theory',
+          expectedLevel: 'Intermediate',
+          description: 'Time/space complexity, hash maps, graph traversal, and algorithmic problem solving.',
+          weight: 25,
+        },
+        {
+          skillName: 'React & Modern Frontend Architecture',
+          category: 'Applied Engineering',
+          expectedLevel: 'Intermediate',
+          description: 'State management, custom hooks, component composition, and responsive UX.',
+          weight: 20,
+        },
+        {
+          skillName: 'Node.js, Express & REST/GraphQL APIs',
+          category: 'Applied Engineering',
+          expectedLevel: 'Intermediate',
+          description: 'Authentication, middleware, rate-limiting, and microservice communication.',
+          weight: 20,
+        },
+        {
+          skillName: 'Relational Database Design & SQL Query Tuning',
+          category: 'Tools & Infrastructure',
+          expectedLevel: 'Intermediate',
+          description: 'PostgreSQL indexing, transactions, ACID compliance, and schema migrations.',
+          weight: 20,
+        },
+        {
+          skillName: 'Live Cloud Deployment & CI/CD Verification',
+          category: 'Tools & Infrastructure',
+          expectedLevel: 'Beginner',
+          description: 'Deployed public URL with working database and build scripts.',
+          weight: 15,
+        },
+      ],
+      evaluationCriteria: {
+        clarityWeight: 15,
+        technicalWeight: 30,
+        projectWeight: 30,
+        communicationWeight: 15,
+        executionWeight: 10,
+      },
+    };
+  }
+
+  // Default / Universal Engineering Competency Model
+  return {
+    roleId,
+    roleTitle: roleTitle || 'Engineering Specialist',
+    description: 'Applied technical mastery, systematic problem solving, and production proof benchmark.',
+    minimumReadinessBenchmark: 68,
+    coreCompetencies: [
+      {
+        skillName: 'Core Domain Knowledge & Theory',
+        category: 'Core Theory',
+        expectedLevel: 'Intermediate',
+        description: 'Deep understanding of core engineering principles in your chosen stream.',
+        weight: 25,
+      },
+      {
+        skillName: 'Applied Tools & Modern Toolchains',
+        category: 'Applied Engineering',
+        expectedLevel: 'Intermediate',
+        description: 'Hands-on proficiency with industry-standard software, SDKs, and platforms.',
+        weight: 25,
+      },
+      {
+        skillName: 'Real-world Capstone Project Evidence',
+        category: 'Applied Engineering',
+        expectedLevel: 'Intermediate',
+        description: 'Working demonstration of a complex project built and deployed or documented.',
+        weight: 25,
+      },
+      {
+        skillName: 'Professional Technical Communication',
+        category: 'Problem Solving',
+        expectedLevel: 'Intermediate',
+        description: 'Ability to summarize technical complexity clearly in concise responses.',
+        weight: 15,
+      },
+      {
+        skillName: 'Execution Consistency & Time Commitment',
+        category: 'Problem Solving',
+        expectedLevel: 'Beginner',
+        description: 'Disciplined weekly hours allocated towards structured career progression.',
+        weight: 10,
+      },
+    ],
+    evaluationCriteria: {
+      clarityWeight: 20,
+      technicalWeight: 30,
+      projectWeight: 25,
+      communicationWeight: 15,
+      executionWeight: 10,
+    },
+  };
+}
+

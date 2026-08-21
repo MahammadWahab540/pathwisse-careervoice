@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { RoadmapWeek, CareerRoleTarget } from '../../types';
 import { QalamCharacter } from '../qalam/QalamCharacter';
-import { Calendar, Clock, CheckCircle2, ChevronDown, ChevronUp, Share2, Rocket, PlayCircle, Lock, BookOpen } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, ChevronDown, ChevronUp, Share2, Rocket, PlayCircle, Lock, BookOpen, RotateCcw } from 'lucide-react';
 
 interface RoadmapViewProps {
   roadmap: RoadmapWeek[];
   role: CareerRoleTarget;
   onOpenShare: () => void;
   onOpenUpgrade: () => void;
+  onOpenReAudit?: () => void;
   trackEvent: (eventName: string, metadata?: any) => void;
 }
 
@@ -16,6 +17,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
   role,
   onOpenShare,
   onOpenUpgrade,
+  onOpenReAudit,
   trackEvent,
 }) => {
   const [expandedWeek, setExpandedWeek] = useState<number>(1);
@@ -142,10 +144,21 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
 
         {/* CTAs Row */}
         <div className="space-y-2 pt-2">
+          {onOpenReAudit && (
+            <button
+              type="button"
+              onClick={onOpenReAudit}
+              className="w-full py-3.5 px-4 rounded-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4 text-emerald-200" />
+              <span>Re-Audit Readiness After Progress</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onOpenUpgrade}
-            className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+            className="w-full py-3 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
           >
             <Rocket className="w-4 h-4 text-white" />
             <span>Join Pathwisse Pro Accelerator</span>

@@ -36,12 +36,51 @@ export interface CareerRoleTarget {
   keySkills: string[];
 }
 
+export interface CompetencySkillBenchmark {
+  skillName: string;
+  category: 'Core Theory' | 'Applied Engineering' | 'Tools & Infrastructure' | 'Problem Solving';
+  expectedLevel: 'Beginner' | 'Intermediate' | 'Advanced';
+  description: string;
+  weight: number;
+}
+
+export interface RoleCompetencyModel {
+  roleId: string;
+  roleTitle: string;
+  description: string;
+  minimumReadinessBenchmark: number; // e.g. 70
+  coreCompetencies: CompetencySkillBenchmark[];
+  evaluationCriteria: {
+    clarityWeight: number;
+    technicalWeight: number;
+    projectWeight: number;
+    communicationWeight: number;
+    executionWeight: number;
+  };
+}
+
+export interface DiagnosticConclusion {
+  id: string;
+  skillName: string;
+  studentAnswerSnippet: string;
+  evidenceVerified: string;
+  evidenceStrength: 'Strong' | 'Moderate' | 'Weak' | 'None';
+  score: number; // 0 - 100
+  confidenceScore: number; // 0 - 100
+  confidenceLevel: 'High' | 'Medium' | 'Low';
+  gapSeverity: 'RED' | 'ORANGE' | 'GREEN';
+  gapDescription: string;
+  recommendedAction: string;
+}
+
 export interface SkillEvidence {
   skillName: string;
   claimedLevel: 'Beginner' | 'Intermediate' | 'Advanced';
   evidenceLevel: 'None' | 'Beginner' | 'Intermediate' | 'Advanced';
   confidenceScore: number; // 0 - 100
+  confidenceLevel?: 'High' | 'Medium' | 'Low';
   notes?: string;
+  mappedEvidence?: string;
 }
 
 export interface DimensionScores {
@@ -60,6 +99,16 @@ export interface CareerGap {
   description: string;
   pathwisseSkillId?: string;
   recommendedAction: string;
+  associatedSkill?: string;
+  evidenceBasis?: string;
+}
+
+export interface RoadmapTopic {
+  name: string;
+  description: string;
+  learningOutcome: string;
+  type: 'Concept' | 'Project' | 'Practice' | 'Interview';
+  completed?: boolean;
 }
 
 export interface RoadmapWeek {
@@ -67,18 +116,15 @@ export interface RoadmapWeek {
   title: string;
   focusArea: string;
   estimatedHours: number;
-  topics: {
-    name: string;
-    description: string;
-    learningOutcome: string;
-    type: 'Concept' | 'Project' | 'Practice' | 'Interview';
-  }[];
+  topics: RoadmapTopic[];
+  completed?: boolean;
 }
 
 export interface CareerAuditResult {
   overallScore: number;
   dimensionScores: DimensionScores;
   diagnosisSummary: string;
+  diagnosticConclusions: DiagnosticConclusion[];
   gaps: CareerGap[];
   roadmap: RoadmapWeek[];
   recommendedPathwissePlan: {
@@ -86,6 +132,8 @@ export interface CareerAuditResult {
     highlight: string;
     features: string[];
   };
+  auditTimestamp?: string;
+  auditIteration?: number; // 1 for first audit, 2+ for re-audits
 }
 
 export interface AuditMessage {

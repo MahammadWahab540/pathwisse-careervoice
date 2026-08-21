@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { CareerAuditResult, CareerRoleTarget } from '../../types';
-import { Award, ArrowRight, CheckCircle2, AlertTriangle, ChevronRight, BarChart2, Zap, Target } from 'lucide-react';
+import { DiagnosticChainCard } from './DiagnosticChainCard';
+import { Award, ArrowRight, CheckCircle2, AlertTriangle, ChevronRight, BarChart2, Zap, Target, ShieldAlert, Sparkles } from 'lucide-react';
 
 interface ReadinessReportViewProps {
   result: CareerAuditResult;
@@ -18,6 +19,8 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
   onNext,
   trackEvent,
 }) => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'diagnostics'>('overview');
+
   useEffect(() => {
     trackEvent('audit_completed', { overallScore: result.overallScore, role: role.id });
     trackEvent('readiness_report_viewed');
@@ -40,17 +43,17 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
   ];
 
   return (
-    <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-5 max-w-sm mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
+    <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-4 max-w-md mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
       {/* Qalam Mascot */}
       <QalamCharacter
         state="ENCOURAGING"
-        subtitles="Here is your verified career readiness score. Let's look at your key strengths and growth areas."
+        subtitles="Here is your verified career readiness score and auditor diagnostic chain. Let's inspect where evidence holds you back and where you shine."
       />
 
-      {/* Main Score Card */}
+      {/* Main Score & Diagnostic Card */}
       <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         {/* Score Radial Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1">
               <Target className="w-3 h-3 text-[#1f3861]" />
@@ -73,59 +76,113 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
           </div>
         </div>
 
+        {/* Tab Toggle: Index Overview vs 6-Stage Diagnostic Chain */}
+        <div className="flex items-center bg-slate-100 p-1 rounded-2xl">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition ${
+              activeTab === 'overview' ? 'bg-white text-[#1f3861] shadow-2xs' : 'text-slate-600'
+            }`}
+          >
+            Dimension Scores
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('diagnostics');
+              trackEvent('diagnostic_chain_tab_viewed');
+            }}
+            className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+              activeTab === 'diagnostics' ? 'bg-white text-[#1f3861] shadow-2xs' : 'text-slate-600'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            Auditor Findings ({result.diagnosticConclusions?.length || result.gaps?.length || 3})
+          </button>
+        </div>
+
         {/* Constructive Diagnosis Summary */}
         <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#1f3861]">
             <Award className="w-3.5 h-3.5 text-[#1f3861]" />
-            Qalam's Strategic Feedback
+            Qalam's Auditor Assessment
           </div>
           <p className="text-xs text-slate-600 leading-relaxed font-medium">
             "{result.diagnosisSummary}"
           </p>
         </div>
 
-        {/* 6 Dimension Sub-Scores Breakdown */}
-        <div className="space-y-2.5 pt-1">
-          <h3 className="text-xs font-bold text-[#0b111e] uppercase tracking-wider flex items-center gap-1.5">
-            <BarChart2 className="w-3.5 h-3.5 text-[#1f3861]" />
-            Readiness Breakdown
-          </h3>
+        {activeTab === 'overview' ? (
+          /* 6 Dimension Sub-Scores Breakdown */
+          <div className="space-y-2.5 pt-1">
+            <h3 className="text-xs font-bold text-[#0b111e] uppercase tracking-wider flex items-center gap-1.5">
+              <BarChart2 className="w-3.5 h-3.5 text-[#1f3861]" />
+              Readiness Breakdown
+            </h3>
 
-          <div className="grid grid-cols-2 gap-2">
-            {dimensions.map((d) => (
-              <div
-                key={d.label}
-                className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5"
-              >
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-600 font-bold truncate">{d.label}</span>
-                  <span className="font-mono font-black text-[#0b111e]">{d.score}%</span>
+            <div className="grid grid-cols-2 gap-2">
+              {dimensions.map((d) => (
+                <div
+                  key={d.label}
+                  className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-600 font-bold truncate">{d.label}</span>
+                    <span className="font-mono font-black text-[#0b111e]">{d.score}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${d.score}%` }}
+                      transition={{ duration: 0.8, ease: 'easeOut' }}
+                      className={`h-full rounded-full ${
+                        d.score >= 70 ? 'bg-emerald-500' : d.score >= 45 ? 'bg-[#1f3861]' : 'bg-amber-500'
+                      }`}
+                    />
+                  </div>
                 </div>
-                <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${d.score}%` }}
-                    transition={{ duration: 0.8, ease: 'easeOut' }}
-                    className={`h-full rounded-full ${
-                      d.score >= 70 ? 'bg-emerald-500' : d.score >= 45 ? 'bg-[#1f3861]' : 'bg-amber-500'
-                    }`}
-                  />
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          /* Diagnostic Chain Conclusions */
+          <div className="space-y-3 pt-1 max-h-80 overflow-y-auto pr-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                Answer → Evidence → Skill → Score → Gap → Action
+              </span>
+            </div>
+            {result.diagnosticConclusions && result.diagnosticConclusions.length > 0 ? (
+              result.diagnosticConclusions.map((conclusion, idx) => (
+                <DiagnosticChainCard key={conclusion.id || idx} conclusion={conclusion} index={idx} />
+              ))
+            ) : (
+              result.gaps.map((gap, idx) => (
+                <div key={gap.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1 text-xs">
+                  <div className="flex items-center justify-between font-bold">
+                    <span>{gap.title}</span>
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">{gap.severity}</span>
+                  </div>
+                  <p className="text-slate-600">{gap.description}</p>
+                  <p className="text-emerald-700 font-semibold pt-1">Fix: {gap.recommendedAction}</p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* Primary Next Action */}
         <button
           onClick={onNext}
           className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
         >
-          <span>View Identified Gaps & Solutions</span>
+          <span>View Detailed Prioritized Gap Report</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>
     </div>
   );
 };
+
 

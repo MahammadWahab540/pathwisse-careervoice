@@ -11,6 +11,7 @@ import { AskYearStep } from './components/audit/AskYearStep';
 import { CareerIntentStep } from './components/audit/CareerIntentStep';
 import { RoleDiscoveryStep } from './components/audit/RoleDiscoveryStep';
 import { RoleExplanationStep } from './components/audit/RoleExplanationStep';
+import { LoadCompetencyModelStep } from './components/audit/LoadCompetencyModelStep';
 import { AdaptiveInterviewStep } from './components/audit/AdaptiveInterviewStep';
 import { EvidenceUploadStep } from './components/audit/EvidenceUploadStep';
 import { ProcessingSequenceStep } from './components/audit/ProcessingSequenceStep';
@@ -19,6 +20,8 @@ import { GapReportView } from './components/audit/GapReportView';
 import { RoadmapView } from './components/audit/RoadmapView';
 import { ShareCardModal } from './components/audit/ShareCardModal';
 import { UpgradeModal } from './components/audit/UpgradeModal';
+import { ReAuditModal } from './components/audit/ReAuditModal';
+import { SupabaseConfigModal } from './components/audit/SupabaseConfigModal';
 
 import { CareerRole, CONSUMER_CAREER_ROLES } from './data/careerTaxonomy';
 import { PATHWISSE_ROLES, generateDefaultRoadmap } from './data/knowledgeGraph';
@@ -31,7 +34,7 @@ import {
   EvidenceUploads,
   CareerAuditResult,
 } from './types';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Database } from 'lucide-react';
 
 type AuditStep =
   | 'WELCOME'
@@ -43,6 +46,7 @@ type AuditStep =
   | 'CAREER_INTENT'
   | 'ROLE_DISCOVERY'
   | 'ROLE_EXPLANATION'
+  | 'LOAD_COMPETENCY_MODEL'
   | 'CAREER_READINESS_AUDIT'
   | 'EVIDENCE_UPLOAD'
   | 'PROCESSING'
@@ -75,6 +79,8 @@ export function App() {
   // Modals
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
+  const [isReAuditOpen, setIsReAuditOpen] = useState(false);
+  const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
 
   // Strict Analytics Event Tracker
   const trackEvent = useCallback(
@@ -162,6 +168,47 @@ export function App() {
         diagnosisSummary:
           data.diagnosisSummary ||
           `You demonstrate a strong baseline in engineering fundamentals for ${targetRole.title}. Your main growth area is proving practical implementation through live deployed projects.`,
+        diagnosticConclusions: data.diagnosticConclusions || [
+          {
+            id: 'diag_1',
+            skillName: targetRole.keySkills[0] || 'Core Applied Engineering',
+            studentAnswerSnippet: 'Described project implementation and key concepts during audit.',
+            evidenceVerified: evidence?.gitHubUrl ? 'GitHub profile provided' : 'No public demo link or containerized API provided',
+            evidenceStrength: evidence?.gitHubUrl ? 'Moderate' : 'Weak',
+            score: 42,
+            confidenceScore: 85,
+            confidenceLevel: 'High',
+            gapSeverity: 'RED',
+            gapDescription: 'Lacks a publicly accessible live API or web application showing end-to-end implementation.',
+            recommendedAction: 'Build and deploy a containerized microservice to Cloud Run / Vercel.',
+          },
+          {
+            id: 'diag_2',
+            skillName: targetRole.keySkills[1] || 'Foundational Algorithms & Theory',
+            studentAnswerSnippet: 'Demonstrated conceptual knowledge of algorithms and tools.',
+            evidenceVerified: 'Interview response showed familiarity with core concepts.',
+            evidenceStrength: 'Moderate',
+            score: 55,
+            confidenceScore: 80,
+            confidenceLevel: 'High',
+            gapSeverity: 'ORANGE',
+            gapDescription: 'Understands intuition but lacks mathematical and optimization depth.',
+            recommendedAction: 'Complete Pathwisse Module 1 on Applied Foundations & Data Modeling.',
+          },
+          {
+            id: 'diag_3',
+            skillName: 'Public Code Rigor & Engineering Standards',
+            studentAnswerSnippet: 'Mentioned general code writing without continuous testing or architecture documentation.',
+            evidenceVerified: evidence?.gitHubUrl ? 'GitHub repository provided' : 'No repository provided',
+            evidenceStrength: 'Moderate',
+            score: 48,
+            confidenceScore: 75,
+            confidenceLevel: 'Medium',
+            gapSeverity: 'ORANGE',
+            gapDescription: 'Repositories lack clean environment locks, test suites, and architectural diagrams.',
+            recommendedAction: 'Restructure top 2 repositories with production-grade documentation and system architecture diagrams.',
+          }
+        ],
         gaps: data.gaps || [
           {
             id: 'gap_1',
@@ -194,6 +241,18 @@ export function App() {
       };
 
       setAuditResult(fullResult);
+
+      // Sync Audit Record to Supabase BaaS
+      fetch('/api/supabase/audit/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: identity?.phone || 'anonymous',
+          targetRole: targetRole.title,
+          auditResult: fullResult,
+          evidenceData: evidence,
+        }),
+      }).catch((e) => console.warn('Supabase audit sync notice:', e));
 
       // Save Audit Session to Firestore
       try {
@@ -270,13 +329,24 @@ export function App() {
           </div>
         </div>
 
-        <button
-          onClick={handleRestartAudit}
-          className="p-2 rounded-full bg-white border border-[#e1e7ef] text-[#344256] hover:text-[#0b111e] hover:bg-[#f8fafc] transition shadow-xs"
-          title="Restart Audit"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsSupabaseOpen(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 transition shadow-2xs cursor-pointer"
+            title="Supabase BaaS Status & Schema"
+          >
+            <Database className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">Supabase</span> BaaS
+          </button>
+
+          <button
+            onClick={handleRestartAudit}
+            className="p-2 rounded-full bg-white border border-[#e1e7ef] text-[#344256] hover:text-[#0b111e] hover:bg-[#f8fafc] transition shadow-xs cursor-pointer"
+            title="Restart Audit"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {/* Mobile-first Product Frame Container */}
@@ -375,6 +445,21 @@ export function App() {
               onIntentProcessed={(intentData) => {
                 setUserRawIntent(intentData.userRawIntent);
                 setCurrentStep('ROLE_DISCOVERY');
+
+                // Sync Student Profile to Supabase BaaS
+                fetch('/api/supabase/profile/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    phone: identity?.phone || 'anonymous',
+                    firstName: firstName,
+                    collegeTier: 'Tier-2/3',
+                    collegeName: collegeName,
+                    branch: departmentName,
+                    gradYear: academicYear,
+                    careerIntent: intentData.userRawIntent,
+                  }),
+                }).catch((e) => console.warn('Supabase profile sync notice:', e));
               }}
               trackEvent={trackEvent}
             />
@@ -397,6 +482,7 @@ export function App() {
             <RoleExplanationStep
               role={selectedRoleForExploration}
               firstName={firstName}
+              allRoles={CONSUMER_CAREER_ROLES.slice(0, 5)}
               onConfirmTargetRole={(confirmedRole) => {
                 const target: CareerRoleTarget = {
                   id: confirmedRole.id,
@@ -407,9 +493,21 @@ export function App() {
                   keySkills: confirmedRole.keySkills,
                 };
                 setTargetRole(target);
-                setCurrentStep('CAREER_READINESS_AUDIT');
+                setCurrentStep('LOAD_COMPETENCY_MODEL');
+              }}
+              onSelectDifferentRole={(newRole) => {
+                setSelectedRoleForExploration(newRole);
               }}
               onExploreAnotherRole={() => setCurrentStep('ROLE_DISCOVERY')}
+              trackEvent={trackEvent}
+            />
+          )}
+
+          {currentStep === 'LOAD_COMPETENCY_MODEL' && (
+            <LoadCompetencyModelStep
+              role={targetRole}
+              firstName={firstName}
+              onProceedToAudit={() => setCurrentStep('CAREER_READINESS_AUDIT')}
               trackEvent={trackEvent}
             />
           )}
@@ -475,27 +573,48 @@ export function App() {
               role={targetRole}
               onOpenShare={() => setIsShareOpen(true)}
               onOpenUpgrade={() => setIsUpgradeOpen(true)}
+              onOpenReAudit={() => setIsReAuditOpen(true)}
               trackEvent={trackEvent}
             />
           )}
         </div>
       </main>
 
-      {/* Share & Upgrade Modals */}
+      {/* Share, Upgrade, & Re-Audit Modals */}
       {auditResult && (
-        <ShareCardModal
-          isOpen={isShareOpen}
-          onClose={() => setIsShareOpen(false)}
-          result={auditResult}
-          role={targetRole}
-          trackEvent={trackEvent}
-        />
+        <>
+          <ShareCardModal
+            isOpen={isShareOpen}
+            onClose={() => setIsShareOpen(false)}
+            result={auditResult}
+            role={targetRole}
+            trackEvent={trackEvent}
+          />
+
+          <ReAuditModal
+            isOpen={isReAuditOpen}
+            onClose={() => setIsReAuditOpen(false)}
+            role={targetRole}
+            roadmap={auditResult.roadmap}
+            previousResult={auditResult}
+            onReAuditComplete={(updatedRes) => {
+              setAuditResult(updatedRes);
+              setCurrentStep('READINESS_REPORT');
+            }}
+            trackEvent={trackEvent}
+          />
+        </>
       )}
 
       <UpgradeModal
         isOpen={isUpgradeOpen}
         onClose={() => setIsUpgradeOpen(false)}
         trackEvent={trackEvent}
+      />
+
+      <SupabaseConfigModal
+        isOpen={isSupabaseOpen}
+        onClose={() => setIsSupabaseOpen(false)}
       />
     </div>
   );
