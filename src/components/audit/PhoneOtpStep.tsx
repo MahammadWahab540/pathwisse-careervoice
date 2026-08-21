@@ -61,7 +61,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
     trackEvent('otp_requested', { phone: `${selectedCountry.code}${cleanPhone}` });
     setOtpSent(true);
     setCountdown(30);
-    setOtpDigits(['1', '2', '3', '4', '5', '6']); // Pre-fill with sample 6-digit for seamless verification
+    setOtpDigits(['', '', '', '', '', '']);
   };
 
   const handleDigitChange = (index: number, val: string) => {

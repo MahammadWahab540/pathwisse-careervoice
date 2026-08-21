@@ -75,6 +75,8 @@ export function App() {
   const [communicationSample, setCommunicationSample] = useState('');
   const [evidence, setEvidence] = useState<EvidenceUploads>({});
   const [auditResult, setAuditResult] = useState<CareerAuditResult | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
 
   // Modals
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -132,6 +134,8 @@ export function App() {
   // Handle Evaluation & Audit Score Generation
   const handleGenerateResults = async () => {
     setCurrentStep('PROCESSING');
+    setIsEvaluating(true);
+    setEvaluationError(null);
 
     const studentCtx: StudentContext = {
       degree: 'B.Tech / B.E.',
@@ -155,85 +159,18 @@ export function App() {
 
       const data = await res.json();
 
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Evaluation engine failed to score audit answers.');
+      }
+
       const fullResult: CareerAuditResult = {
-        overallScore: data.overallScore || 45,
-        dimensionScores: data.dimensionScores || {
-          careerClarity: 72,
-          technicalReadiness: 44,
-          projectReadiness: 32,
-          communication: 60,
-          placementReadiness: 40,
-          executionReadiness: 55,
-        },
-        diagnosisSummary:
-          data.diagnosisSummary ||
-          `You demonstrate a strong baseline in engineering fundamentals for ${targetRole.title}. Your main growth area is proving practical implementation through live deployed projects.`,
-        diagnosticConclusions: data.diagnosticConclusions || [
-          {
-            id: 'diag_1',
-            skillName: targetRole.keySkills[0] || 'Core Applied Engineering',
-            studentAnswerSnippet: 'Described project implementation and key concepts during audit.',
-            evidenceVerified: evidence?.gitHubUrl ? 'GitHub profile provided' : 'No public demo link or containerized API provided',
-            evidenceStrength: evidence?.gitHubUrl ? 'Moderate' : 'Weak',
-            score: 42,
-            confidenceScore: 85,
-            confidenceLevel: 'High',
-            gapSeverity: 'RED',
-            gapDescription: 'Lacks a publicly accessible live API or web application showing end-to-end implementation.',
-            recommendedAction: 'Build and deploy a containerized microservice to Cloud Run / Vercel.',
-          },
-          {
-            id: 'diag_2',
-            skillName: targetRole.keySkills[1] || 'Foundational Algorithms & Theory',
-            studentAnswerSnippet: 'Demonstrated conceptual knowledge of algorithms and tools.',
-            evidenceVerified: 'Interview response showed familiarity with core concepts.',
-            evidenceStrength: 'Moderate',
-            score: 55,
-            confidenceScore: 80,
-            confidenceLevel: 'High',
-            gapSeverity: 'ORANGE',
-            gapDescription: 'Understands intuition but lacks mathematical and optimization depth.',
-            recommendedAction: 'Complete Pathwisse Module 1 on Applied Foundations & Data Modeling.',
-          },
-          {
-            id: 'diag_3',
-            skillName: 'Public Code Rigor & Engineering Standards',
-            studentAnswerSnippet: 'Mentioned general code writing without continuous testing or architecture documentation.',
-            evidenceVerified: evidence?.gitHubUrl ? 'GitHub repository provided' : 'No repository provided',
-            evidenceStrength: 'Moderate',
-            score: 48,
-            confidenceScore: 75,
-            confidenceLevel: 'Medium',
-            gapSeverity: 'ORANGE',
-            gapDescription: 'Repositories lack clean environment locks, test suites, and architectural diagrams.',
-            recommendedAction: 'Restructure top 2 repositories with production-grade documentation and system architecture diagrams.',
-          }
-        ],
-        gaps: data.gaps || [
-          {
-            id: 'gap_1',
-            title: 'No Deployed Production Endpoints',
-            severity: 'RED',
-            description: 'Lacks a live accessible endpoint or web API showing end-to-end deployment.',
-            recommendedAction: 'Deploy your top capstone project to a cloud container runtime.',
-          },
-          {
-            id: 'gap_2',
-            title: 'Applied Math & Analytical Foundations',
-            severity: 'RED',
-            description: 'Requires higher mathematical and algorithmic rigor.',
-            recommendedAction: 'Complete Pathwisse Module 1 on Applied Foundations.',
-          },
-          {
-            id: 'gap_3',
-            title: 'GitHub Portfolio Architecture',
-            severity: 'ORANGE',
-            description: 'Repositories need clean documentation, tests, and architecture diagrams.',
-            recommendedAction: 'Restructure top 2 repositories according to Pathwisse specs.',
-          },
-        ],
-        roadmap: generateDefaultRoadmap(targetRole.id, targetRole.title),
-        recommendedPathwissePlan: {
+        overallScore: data.overallScore,
+        dimensionScores: data.dimensionScores,
+        diagnosisSummary: data.diagnosisSummary,
+        diagnosticConclusions: data.diagnosticConclusions,
+        gaps: data.gaps,
+        roadmap: data.roadmap || generateDefaultRoadmap(targetRole.id, targetRole.title),
+        recommendedPathwissePlan: data.recommendedPathwissePlan || {
           planName: 'Pathwisse Pro',
           highlight: 'Fast-track your gap resolution in 6 weeks with live mentor code reviews.',
           features: ['6-Week Course Modules', '1-on-1 Mentor Code Reviews', 'Guaranteed Placement Drives'],
@@ -241,6 +178,7 @@ export function App() {
       };
 
       setAuditResult(fullResult);
+      setIsEvaluating(false);
 
       // Sync Audit Record to Supabase BaaS
       fetch('/api/supabase/audit/save', {
@@ -273,36 +211,10 @@ export function App() {
       } catch (err) {
         console.warn('Audit session Firestore save error:', err);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate results:', err);
-      // Fallback result
-      setAuditResult({
-        overallScore: 45,
-        dimensionScores: {
-          careerClarity: 72,
-          technicalReadiness: 44,
-          projectReadiness: 32,
-          communication: 60,
-          placementReadiness: 40,
-          executionReadiness: 55,
-        },
-        diagnosisSummary: `You have clear interest in ${targetRole.title}. Work on building and deploying live portfolio projects to boost placement readiness.`,
-        gaps: [
-          {
-            id: 'gap_1',
-            title: 'Missing Live Deployment Links',
-            severity: 'RED',
-            description: 'Recruiters require live working URLs on resumes.',
-            recommendedAction: 'Deploy capstone project.',
-          },
-        ],
-        roadmap: generateDefaultRoadmap(targetRole.id, targetRole.title),
-        recommendedPathwissePlan: {
-          planName: 'Pathwisse Pro',
-          highlight: 'Fast-track your gap resolution in 6 weeks.',
-          features: ['6-Week Modules', 'Mentor Code Reviews'],
-        },
-      });
+      setIsEvaluating(false);
+      setEvaluationError(err.message || 'Audit evaluation failed. Please retry.');
     }
   };
 
@@ -544,6 +456,9 @@ export function App() {
 
           {currentStep === 'PROCESSING' && (
             <ProcessingSequenceStep
+              isEvaluating={isEvaluating}
+              error={evaluationError}
+              onRetry={handleGenerateResults}
               onFinished={() => setCurrentStep('READINESS_REPORT')}
               trackEvent={trackEvent}
             />

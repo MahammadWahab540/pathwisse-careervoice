@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { CareerRoleTarget, RoleCompetencyModel } from '../../types';
 import { getRoleCompetencyModel } from '../../data/knowledgeGraph';
-import { Target, CheckCircle2, ShieldCheck, ArrowRight, Layers, Award, Sparkles, Cpu } from 'lucide-react';
+import { Target, CheckCircle2, ShieldCheck, ArrowRight, Layers, Award, Sparkles, Cpu, Loader2 } from 'lucide-react';
 
 interface LoadCompetencyModelStepProps {
   role: CareerRoleTarget;
@@ -18,10 +18,42 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
   onProceedToAudit,
   trackEvent,
 }) => {
-  const competencyModel: RoleCompetencyModel = getRoleCompetencyModel(role.id, role.title);
+  const [model, setModel] = useState<RoleCompetencyModel>(() => getRoleCompetencyModel(role.id, role.title));
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+    fetch(`/api/catalog/competency/${encodeURIComponent(role.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data && data.coreCompetencies) {
+          setModel({
+            roleId: data.roleId || role.id,
+            roleTitle: role.title,
+            minimumReadinessBenchmark: data.minimumReadinessBenchmark || 75,
+            evaluationCriteria: data.evaluationCriteria || {
+              clarityWeight: 0.1,
+              technicalWeight: 0.35,
+              projectWeight: 0.25,
+              communicationWeight: 0.15,
+              executionWeight: 0.15,
+            },
+            coreCompetencies: data.coreCompetencies || [],
+            description: `Official Pathwisse & Supabase Competency Model for ${role.title}`,
+          });
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Notice: Loading fallback competency model:', err);
+        if (isMounted) setLoading(false);
+      });
+
     trackEvent('competency_model_loaded', { roleId: role.id, roleTitle: role.title });
+
+    return () => {
+      isMounted = false;
+    };
   }, [role, trackEvent]);
 
   return (
@@ -29,7 +61,7 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
       {/* Qalam Mascot */}
       <QalamCharacter
         state="ENCOURAGING"
-        subtitles={`I have loaded the official industry competency model for ${role.title}. Here is the exact benchmark I will audit you against, ${firstName || 'friend'}.`}
+        subtitles={`I have loaded the verified industry competency model for ${role.title} from Supabase. Here is the exact benchmark I will audit you against, ${firstName || 'friend'}.`}
       />
 
       {/* Main Competency Benchmark Box */}
@@ -38,31 +70,27 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1">
               <Cpu className="w-3 h-3 text-[#1f3861]" />
-              Role Competency Model
+              Supabase Competency Benchmark
             </span>
             <h2 className="text-base font-bold text-[#0b111e] mt-0.5">{role.title}</h2>
           </div>
           <div className="text-right">
             <span className="text-[9px] font-bold text-slate-500 uppercase block">Hiring Bar</span>
             <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-              {competencyModel.minimumReadinessBenchmark}+ / 100
+              {model.minimumReadinessBenchmark}+ / 100
             </span>
           </div>
         </div>
-
-        <p className="text-xs text-slate-600 font-medium leading-relaxed">
-          {competencyModel.description}
-        </p>
 
         {/* 5 Core Competency Vectors Tested */}
         <div className="space-y-2.5">
           <h3 className="text-xs font-bold text-[#0b111e] uppercase tracking-wider flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-[#1f3861]" />
-            5 Evaluation Dimensions
+            Evaluation Dimensions & Weightings
           </h3>
 
           <div className="space-y-2">
-            {competencyModel.coreCompetencies.map((comp, idx) => (
+            {model.coreCompetencies.map((comp, idx) => (
               <motion.div
                 key={comp.skillName}
                 initial={{ opacity: 0, y: 5 }}
@@ -99,14 +127,21 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
 
         {/* Start Voice Audit Button */}
         <button
-          onClick={onProceedToAudit}
-          className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+          type="button"
+          onClick={() => {
+            trackEvent('start_audit_from_model_clicked', { roleId: role.id });
+            onProceedToAudit();
+          }}
+          className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] shadow-md cursor-pointer"
         >
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <span>Launch Adaptive Voice Audit</span>
-          <ArrowRight className="w-4 h-4" />
+          <span>Begin 1-on-1 Career Audit</span>
+          <ArrowRight className="w-4 h-4 text-white" />
         </button>
       </div>
+
+      <p className="text-[11px] text-slate-400 font-medium">
+        Microphone permission will be requested. You can also type anytime.
+      </p>
     </div>
   );
 };

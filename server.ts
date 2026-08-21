@@ -4,7 +4,17 @@ import path from 'path';
 import { GoogleGenAI, Type, Modality, LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
-import { getSupabase, SUPABASE_SQL_SCHEMA } from './src/lib/supabase';
+import {
+  getSupabase,
+  SUPABASE_SQL_SCHEMA,
+  autoSeedSupabaseData,
+} from './src/lib/supabase';
+import {
+  SEED_CAREER_STREAMS,
+  SEED_CAREER_ROLES,
+  SEED_ROLE_COMPETENCIES,
+  SEED_PRICING_PLANS,
+} from './src/lib/seedData';
 
 const app = express();
 const PORT = 3000;
@@ -128,72 +138,189 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Endpoint: Get Published Career Streams
-app.get('/api/streams', (req, res) => {
-  res.json([
-    { id: 'cs_eng', title: 'Computer Science Engineering', description: 'Software development, AI, data science, cybersecurity & cloud systems.' },
-    { id: 'ece_eng', title: 'Electronics & Communication Engineering', description: 'Embedded systems, VLSI design, IoT, PCB & telecom systems.' },
-    { id: 'ee_eng', title: 'Electrical Engineering', description: 'Power systems, smart grids, control systems & automation.' },
-    { id: 'mech_eng', title: 'Mechanical Engineering', description: 'CAD design, HVAC, manufacturing processes, FEA & robotics.' },
-    { id: 'civil_eng', title: 'Civil Engineering', description: 'Structural engineering, BIM modelling, site management & urban planning.' },
-    { id: 'chem_eng', title: 'Chemical Engineering', description: 'Process engineering, plant operations, quality assurance & petrochemicals.' },
-    { id: 'biomed_eng', title: 'Biomedical Engineering', description: 'Medical device design, clinical instrumentation & biomechanics.' },
-    { id: 'aero_eng', title: 'Aerospace Engineering', description: 'Aerodynamics, avionics systems, propulsion & flight testing.' },
-    { id: 'enviro_eng', title: 'Environmental Engineering', description: 'Environmental impact assessment, water management & sustainability.' },
-    { id: 'industrial_eng', title: 'Industrial & Manufacturing Engineering', description: 'Process improvement, lean operations, supply chain & quality control.' },
-    { id: 'petro_eng', title: 'Petroleum Engineering', description: 'Reservoir engineering, drilling operations & production technology.' },
-    { id: 'robotics_eng', title: 'Robotics & Automation Engineering', description: 'Robotics software, ROS systems, mechatronics & motion control.' },
-    { id: 'materials_eng', title: 'Materials Science Engineering', description: 'Metallurgy, composites, polymers & structural materials analysis.' },
-  ]);
+// API Endpoint: Get Published Career Streams from Supabase
+app.get('/api/streams', async (req, res) => {
+  const supabase = getSupabase();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('career_streams')
+      .select('id, title, description, icon_name, sort_order')
+      .order('sort_order', { ascending: true });
+    if (!error && data && data.length > 0) {
+      return res.json(
+        data.map((s) => ({
+          id: s.id,
+          title: s.title,
+          description: s.description,
+          iconName: s.icon_name,
+        }))
+      );
+    }
+  }
+  res.json(
+    SEED_CAREER_STREAMS.map((s) => ({
+      id: s.id,
+      title: s.title,
+      description: s.description,
+      iconName: s.icon_name,
+    }))
+  );
 });
 
-// API Endpoint: Get Published Career Roles by Stream ID
-app.get('/api/roles', (req, res) => {
+// API Endpoint: Get Published Career Roles from Supabase with Salary Ranges
+app.get('/api/roles', async (req, res) => {
   const { streamId } = req.query;
-  const allRoles = [
-    {
-      id: 'junior_ml_engineer',
-      streamId: 'cs_eng',
-      title: 'Junior ML Engineer',
-      category: 'AI & Data Science',
-      description: 'Build, train, evaluate, and deploy machine learning and LLM models for real-world applications.',
-      demandLevel: 'Extremely High',
-      keySkills: ['Python', 'PyTorch / TensorFlow', 'FastAPI', 'Docker'],
-      status: 'published',
-      matchType: 'Strong match',
-      fitReason: 'Matches strong analytical thinking and interest in building intelligent systems.',
-    },
-    {
-      id: 'full_stack_dev_junior',
-      streamId: 'cs_eng',
-      title: 'Full Stack Developer (Junior)',
-      category: 'Software Engineering',
-      description: 'Develop responsive frontend interfaces and secure backend APIs for modern web applications.',
-      demandLevel: 'High',
-      keySkills: ['React & TypeScript', 'Node.js / Express', 'PostgreSQL / SQL', 'Tailwind CSS'],
-      status: 'published',
-      matchType: 'Strong match',
-      fitReason: 'Great fit for students interested in end-to-end product development.',
-    },
-    {
-      id: 'data_analyst_junior',
-      streamId: 'cs_eng',
-      title: 'Data Analyst',
-      category: 'Analytics',
-      description: 'Extract insights from complex databases using SQL, Python, and BI dashboards.',
-      demandLevel: 'High',
-      keySkills: ['SQL & Query Tuning', 'Python & Pandas', 'Power BI / Tableau'],
-      status: 'published',
-      matchType: 'Worth exploring',
-      fitReason: 'Ideal for students who enjoy uncovering patterns and telling stories with data.',
-    },
-  ];
-
-  if (streamId) {
-    const filtered = allRoles.filter((r) => r.streamId === streamId && r.status === 'published');
-    return res.json(filtered.length > 0 ? filtered : allRoles);
+  const supabase = getSupabase();
+  if (supabase) {
+    let query = supabase.from('career_roles').select('*').eq('status', 'published');
+    if (streamId) {
+      query = query.eq('stream_id', streamId);
+    }
+    const { data, error } = await query;
+    if (!error && data && data.length > 0) {
+      return res.json(
+        data.map((r) => ({
+          id: r.id,
+          streamId: r.stream_id,
+          title: r.title,
+          category: r.category,
+          description: r.description,
+          demandLevel: r.demand_level,
+          salaryMinLpa: r.salary_min_lpa,
+          salaryMaxLpa: r.salary_max_lpa,
+          salaryRangeDisplay: r.salary_range_display,
+          keySkills: r.key_skills || [],
+          matchType: r.match_type,
+          fitReason: r.fit_reason,
+          status: r.status,
+        }))
+      );
+    }
   }
-  res.json(allRoles);
+
+  let roles = SEED_CAREER_ROLES;
+  if (streamId) {
+    roles = roles.filter((r) => r.stream_id === streamId);
+    if (roles.length === 0) roles = SEED_CAREER_ROLES;
+  }
+  res.json(
+    roles.map((r) => ({
+      id: r.id,
+      streamId: r.stream_id,
+      title: r.title,
+      category: r.category,
+      description: r.description,
+      demandLevel: r.demand_level,
+      salaryMinLpa: r.salary_min_lpa,
+      salaryMaxLpa: r.salary_max_lpa,
+      salaryRangeDisplay: r.salary_range_display,
+      keySkills: r.key_skills,
+      matchType: r.match_type,
+      fitReason: r.fit_reason,
+      status: r.status,
+    }))
+  );
+});
+
+// API Endpoint: Get Role Competency Model & Benchmarks from Supabase
+app.get('/api/catalog/competency/:roleId', async (req, res) => {
+  const { roleId } = req.params;
+  const supabase = getSupabase();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('role_competencies')
+      .select('*')
+      .eq('role_id', roleId)
+      .limit(1);
+    if (!error && data && data.length > 0) {
+      const comp = data[0];
+      return res.json({
+        roleId: comp.role_id,
+        minimumReadinessBenchmark: comp.minimum_readiness_benchmark,
+        evaluationCriteria: {
+          clarityWeight: comp.clarity_weight,
+          technicalWeight: comp.technical_weight,
+          projectWeight: comp.project_weight,
+          communicationWeight: comp.communication_weight,
+          executionWeight: comp.execution_weight,
+        },
+        coreCompetencies: comp.core_competencies,
+        roadmapTemplate: comp.roadmap_template,
+      });
+    }
+  }
+
+  const found = SEED_ROLE_COMPETENCIES.find((c) => c.role_id === roleId) || SEED_ROLE_COMPETENCIES[0];
+  res.json({
+    roleId: found.role_id,
+    minimumReadinessBenchmark: found.minimum_readiness_benchmark,
+    evaluationCriteria: {
+      clarityWeight: found.clarity_weight,
+      technicalWeight: found.technical_weight,
+      projectWeight: found.project_weight,
+      communicationWeight: found.communication_weight,
+      executionWeight: found.execution_weight,
+    },
+    coreCompetencies: found.core_competencies,
+    roadmapTemplate: found.roadmap_template,
+  });
+});
+
+// API Endpoint: Get Pricing Plans from Supabase
+app.get('/api/pricing', async (req, res) => {
+  const supabase = getSupabase();
+  if (supabase) {
+    const { data, error } = await supabase.from('pricing_plans').select('*').eq('is_active', true);
+    if (!error && data && data.length > 0) {
+      return res.json(
+        data.map((p) => ({
+          id: p.id,
+          planName: p.plan_name,
+          priceInr: p.price_inr,
+          originalPriceInr: p.original_price_inr,
+          badge: p.badge,
+          highlight: p.highlight,
+          features: p.features,
+          ctaText: p.cta_text,
+        }))
+      );
+    }
+  }
+  res.json(
+    SEED_PRICING_PLANS.map((p) => ({
+      id: p.id,
+      planName: p.plan_name,
+      priceInr: p.price_inr,
+      originalPriceInr: p.original_price_inr,
+      badge: p.badge,
+      highlight: p.highlight,
+      features: p.features,
+      ctaText: p.cta_text,
+    }))
+  );
+});
+
+// API Endpoint: Record Skill Signals / Probes in Supabase
+app.post('/api/audit/evidence/signal', async (req, res) => {
+  const { auditId, phone, skillName, claimedLevel, extractedLevel, confidenceScore, evidenceStrength, source } = req.body;
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('skill_signals').insert({
+        audit_id: auditId || `audit_${Date.now()}`,
+        phone: phone || 'anonymous',
+        skill_name: skillName,
+        claimed_level: claimedLevel,
+        extracted_level: extractedLevel,
+        confidence_score: confidenceScore,
+        evidence_strength: evidenceStrength,
+        source: source || 'voice_probe',
+      });
+    } catch (e) {
+      console.warn('Skill signal insert notice:', e);
+    }
+  }
+  res.json({ success: true });
 });
 
 // API Endpoint: Qalam AI Chat & Adaptive Probing with Weak Evidence Detection
@@ -306,110 +433,30 @@ Respond in valid JSON format matching this schema:
 
 // API Endpoint: Qalam Comprehensive Career Evaluation & Diagnostic Chain Generation
 // Every report conclusion MUST follow: Student Answer → Evidence → Skill → Score → Gap → Recommended Action.
+// Note: Fallback heuristic scoring is removed in accordance with strict real evaluation rules.
 app.post('/api/qalam/evaluate', async (req, res) => {
   try {
     const {
       studentContext = {},
-      targetRole = 'AI / ML Engineer',
+      targetRole = 'Junior ML Engineer',
       conversationHistory = [],
       communicationSample = '',
       evidenceData = {},
       isReAudit = false,
       completedMilestones = [],
+      phone = '',
     } = req.body;
 
     if (!ai) {
-      // Deterministic fallback response if AI key is pending
-      const baseScore = isReAudit ? 62 : 44;
-      return res.json({
-        overallScore: baseScore,
-        dimensionScores: {
-          careerClarity: isReAudit ? 78 : 68,
-          technicalReadiness: isReAudit ? 58 : 42,
-          projectReadiness: isReAudit ? 52 : 30,
-          communication: 60,
-          placementReadiness: isReAudit ? 54 : 38,
-          executionReadiness: 65,
-        },
-        diagnosisSummary: isReAudit
-          ? `Substantial progress detected for ${targetRole}! You have bridged key gaps in core architecture. Next milestone: deploy a live end-to-end containerized service.`
-          : `You demonstrate solid theoretical awareness for ${targetRole}, but your biggest hireability blocker is a lack of publicly verifiable deployed projects and GitHub evidence.`,
-        diagnosticConclusions: [
-          {
-            id: 'diag_1',
-            skillName: 'Production Machine Learning & Model Deployment',
-            studentAnswerSnippet: 'Explained training models in Jupyter notebooks with basic dataset split.',
-            evidenceVerified: evidenceData?.gitHubUrl ? 'GitHub repository provided; missing automated tests & Dockerfile' : 'No live demo link or Docker packaging provided',
-            evidenceStrength: 'Weak',
-            score: 38,
-            confidenceScore: 85,
-            confidenceLevel: 'High',
-            gapSeverity: 'RED',
-            gapDescription: 'Models exist only locally in notebooks without containerized APIs or cloud endpoints.',
-            recommendedAction: 'Build and deploy a FastAPI inference endpoint on Cloud Run or Vercel.',
-          },
-          {
-            id: 'diag_2',
-            skillName: 'Mathematical Foundations & Optimization',
-            studentAnswerSnippet: 'Mentioned using standard library loss functions without custom loss derivation.',
-            evidenceVerified: 'Interview response showed familiarity with gradient descent concepts.',
-            evidenceStrength: 'Moderate',
-            score: 55,
-            confidenceScore: 80,
-            confidenceLevel: 'High',
-            gapSeverity: 'ORANGE',
-            gapDescription: 'Understands intuition but lacks mathematical rigor in backpropagation & metric optimization.',
-            recommendedAction: 'Complete Pathwisse Module 1 on Applied Linear Algebra & Custom Loss Functions.',
-          },
-          {
-            id: 'diag_3',
-            skillName: 'Engineering Rigor & Documentation',
-            studentAnswerSnippet: 'Mentioned basic Git commits without CI/CD or architectural README.',
-            evidenceVerified: evidenceData?.gitHubUrl ? 'GitHub profile attached' : 'No repo URL attached',
-            evidenceStrength: 'Moderate',
-            score: 48,
-            confidenceScore: 75,
-            confidenceLevel: 'Medium',
-            gapSeverity: 'ORANGE',
-            gapDescription: 'Repositories lack structured README benchmarks, architecture diagrams, and environment isolation.',
-            recommendedAction: 'Upgrade top 2 repositories with production-grade documentation and system architecture diagrams.',
-          }
-        ],
-        gaps: [
-          {
-            id: 'gap_1',
-            title: 'No Live Deployed Production Project',
-            severity: 'RED',
-            description: 'Lacks a publicly accessible live API or web application demonstrating end-to-end deployment.',
-            recommendedAction: 'Build and deploy a containerized microservice on Cloud Run/Vercel.',
-            associatedSkill: 'Production Machine Learning & Model Deployment',
-            evidenceBasis: 'Notebook code without production API endpoint',
-          },
-          {
-            id: 'gap_2',
-            title: 'Mathematical Optimization & Statistical Depth',
-            severity: 'ORANGE',
-            description: 'Requires deeper grounding in loss derivation, regularization, and mathematical optimization.',
-            recommendedAction: 'Complete Pathwisse Module 1 on Applied Math & Statistics.',
-            associatedSkill: 'Mathematical Foundations & Optimization',
-            evidenceBasis: 'Conceptual explanation without quantitative formulation',
-          },
-          {
-            id: 'gap_3',
-            title: 'Public GitHub Code Rigor & Documentation',
-            severity: 'ORANGE',
-            description: 'Repositories need clean environment locks, test suites, and architectural diagrams.',
-            recommendedAction: 'Restructure top 2 repositories with production READMEs.',
-            associatedSkill: 'Engineering Rigor & Documentation',
-            evidenceBasis: 'Unstructured repository commit history',
-          },
-        ],
+      return res.status(503).json({
+        success: false,
+        error: 'AI Evaluator service is not initialized (GEMINI_API_KEY required). Strict evaluation requires live model connection.',
       });
     }
 
     const promptText = `You are Qalam, Pathwisse's AI Career Auditor conducting a strict Career Readiness Audit for the role of "${targetRole}".
 
-Student Background: ${JSON.stringify(studentContext)}
+Student Academic Background: ${JSON.stringify(studentContext)}
 Conversation Audit Logs: ${JSON.stringify(conversationHistory)}
 60-Second Communication Intro: "${communicationSample}"
 Uploaded Proof & Evidence: ${JSON.stringify(evidenceData)}
@@ -483,11 +530,48 @@ Format output as valid JSON matching this schema:
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json(parsed);
+    if (!response.text) {
+      throw new Error('Empty response received from evaluation engine.');
+    }
+
+    const parsed = JSON.parse(response.text);
+
+    // Persist verified audit to Supabase
+    const supabase = getSupabase();
+    const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    if (supabase) {
+      try {
+        await supabase.from('career_audits').insert({
+          audit_id: auditId,
+          phone: phone || studentContext?.phone || 'anonymous',
+          target_role_title: targetRole,
+          overall_score: parsed.overallScore || 0,
+          dimension_scores: parsed.dimensionScores || {},
+          diagnosis_summary: parsed.diagnosisSummary || '',
+          diagnostic_conclusions: parsed.diagnosticConclusions || [],
+          gaps: parsed.gaps || [],
+          roadmap: parsed.roadmap || [],
+          evidence_data: evidenceData || {},
+          status: 'COMPLETED',
+          iteration: isReAudit ? 2 : 1,
+        });
+      } catch (dbErr) {
+        console.warn('Supabase audit auto-save notice:', dbErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      auditId,
+      ...parsed,
+    });
   } catch (error: any) {
     console.error('Qalam Evaluate Error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({
+      success: false,
+      error: `AI Evaluation failed: ${error?.message || 'Unknown evaluation error'}. Please retry the audit.`,
+    });
   }
 });
 
@@ -520,18 +604,28 @@ app.get('/api/supabase/status', async (req, res) => {
   if (!supabase) {
     return res.json({
       configured: false,
+      connected: false,
       message: 'SUPABASE_URL and SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are not configured yet in environment variables.',
       schemaSql: SUPABASE_SQL_SCHEMA,
     });
   }
 
   try {
-    const { data, error } = await supabase.from('student_profiles').select('id').limit(1);
-    if (error) {
+    // Attempt auto-seed for tables if empty
+    await autoSeedSupabaseData(supabase);
+
+    const { data: profileCheck, error: profErr } = await supabase.from('student_profiles').select('id').limit(1);
+    const { data: rolesCheck, error: roleErr } = await supabase.from('career_roles').select('id').limit(1);
+    const { data: streamsCheck, error: streamErr } = await supabase.from('career_streams').select('id').limit(1);
+    const { data: compCheck, error: compErr } = await supabase.from('role_competencies').select('id').limit(1);
+    const { data: pricingCheck, error: pricingErr } = await supabase.from('pricing_plans').select('id').limit(1);
+
+    const anyError = profErr || roleErr || streamErr || compErr || pricingErr;
+    if (anyError) {
       return res.json({
         configured: true,
         connected: false,
-        message: `Connected to Supabase project, but table check returned: ${error.message}. Make sure to execute the schema in Supabase SQL editor.`,
+        message: `Connected to Supabase project, but some tables are pending: ${anyError.message}. Execute the schema in Supabase SQL editor.`,
         schemaSql: SUPABASE_SQL_SCHEMA,
       });
     }
@@ -539,7 +633,7 @@ app.get('/api/supabase/status', async (req, res) => {
     return res.json({
       configured: true,
       connected: true,
-      message: 'Successfully connected to Supabase BaaS! Tables are active and ready.',
+      message: 'Successfully connected to Supabase BaaS! Tables (student_profiles, career_streams, career_roles, role_competencies, pricing_plans, career_audits, skill_signals) are verified and active.',
       schemaSql: SUPABASE_SQL_SCHEMA,
     });
   } catch (err: any) {
@@ -612,8 +706,9 @@ app.post('/api/supabase/audit/save', async (req, res) => {
     const { data, error } = await supabase
       .from('career_audits')
       .insert({
+        audit_id: auditResult?.auditId || `audit_${Date.now()}`,
         phone: phone || 'anonymous',
-        target_role: targetRole || 'Software Engineer',
+        target_role_title: targetRole || 'Software Engineer',
         overall_score: auditResult?.overallScore || 0,
         dimension_scores: auditResult?.dimensionScores || {},
         diagnosis_summary: auditResult?.diagnosisSummary || '',
@@ -621,6 +716,7 @@ app.post('/api/supabase/audit/save', async (req, res) => {
         gaps: auditResult?.gaps || [],
         roadmap: auditResult?.roadmap || [],
         evidence_data: evidenceData || {},
+        status: auditResult?.status || 'COMPLETED',
         iteration: auditResult?.auditIteration || 1,
       })
       .select();

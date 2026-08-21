@@ -151,6 +151,21 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       setIsAiLoading(false);
 
       if (data.extractedSkills && data.extractedSkills.length > 0) {
+        // Record signals to Supabase backend
+        data.extractedSkills.forEach((s: any) => {
+          fetch('/api/audit/evidence/signal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              studentId: 'current_student',
+              skillName: s.skill,
+              evidenceLevel: s.level || 'Intermediate',
+              confidenceScore: s.confidence || (data.evidenceStrength === 'Strong' ? 90 : data.evidenceStrength === 'Weak' ? 45 : 75),
+              rawAnswerSnippet: answerText.slice(0, 300),
+            }),
+          }).catch((err) => console.warn('Supabase signal record notice:', err));
+        });
+
         setExtractedSkills((prev) => [
           ...prev,
           ...data.extractedSkills.map((s: any) => ({
