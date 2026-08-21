@@ -8,7 +8,7 @@ Add native Gemini tool calling and adaptive React UI to Pathwisse Qalam without 
 
 - `server.ts` owns Gemini Live (`/live`), `/api/qalam/chat`, and `/api/qalam/evaluate`.
 - `AdaptiveInterviewStep.tsx` consumes `/api/qalam/chat` while preserving voice/text interaction and qalamState transitions.
-- `useGeminiLive.ts` already supports bidirectional audio/transcripts over `/live`, but has no tool-call protocol.
+- `useGeminiLive.ts` supports bidirectional audio/transcripts over `/live` and is extended with a typed tool-call protocol.
 - `App.tsx` owns audit state and transitions to existing readiness, gap, and roadmap screens.
 - Existing report components remain authoritative; adaptive UI augments them rather than replacing them.
 
@@ -20,12 +20,12 @@ The architecture remains portable: the React renderer registry mirrors the same 
 
 ## Tool contract
 
-Create `src/ai/qalamTools.ts` as the single source of truth for:
+`src/ai/qalamTools.ts` is the single source of truth for:
 
 - tool names and TypeScript argument types
 - Gemini `FunctionDeclaration`-compatible JSON schemas
 - runtime normalization of untrusted model arguments
-- `QalamToolCall` envelope used by HTTP and WebSocket transports
+- `QalamToolCall` envelopes used by HTTP and WebSocket transports
 - deterministic `buildAuditToolCalls` mapping for post-evaluation UI
 
 Tools:
@@ -39,30 +39,36 @@ Tools:
 
 ## HTTP flow
 
-`AdaptiveInterviewStep` calls `/api/qalam/chat` as it does today. Gemini receives the six function declarations in AUTO mode. If Gemini selects one or more UI tools, the server records the function calls, acknowledges them to Gemini as queued UI renders, then asks Gemini for the normal typed audit response. The endpoint returns both the existing fields and `toolCalls`.
+`AdaptiveInterviewStep` continues calling `/api/qalam/chat`. The server runs two Gemini operations in parallel:
 
-This preserves the current frontend contract while making the UI intent an actual model-selected function call rather than an extra JSON field.
+1. the existing structured audit-response generation, preserving the current JSON contract
+2. a small adaptive UI planner with the six function declarations enabled
+
+If the planner selects UI tools, `response.functionCalls` are normalized to typed `QalamToolCall` objects and returned beside the normal chat response as `toolCalls`. If no visual adds value, the planner calls no tool.
+
+This keeps chat latency bounded by parallel work and makes UI intent an actual model-selected function call rather than another hand-authored JSON field.
 
 ## Gemini Live flow
 
-The Live config receives the same function declarations. When Gemini emits `message.toolCall.functionCalls`, Express forwards typed `toolCall` WebSocket messages to the browser. The browser renders them immediately and sends a `toolResult` acknowledgement. Express responds to Gemini with `session.sendToolResponse` using the matching function-call id.
+The Live config receives the same function declarations. When Gemini emits `message.toolCall.functionCalls`, Express forwards normalized `toolCall` WebSocket messages to the browser. `useGeminiLive` exposes `onToolCall` for rendering and `sendToolResult(callId, name, result)` for acknowledging the rendered result. Express maps that acknowledgement to `session.sendToolResponse` with the matching function-call id.
 
-This allows adaptive UI to appear during a real voice turn without interrupting audio/transcription messages.
+Audio, input/output transcription, interruption, and turn-complete events remain separate and unchanged.
 
 ## Post-evaluation flow
 
-`/api/qalam/evaluate` continues producing the current audit result. The server additionally returns deterministic adaptive calls derived only from evaluated data:
+`/api/qalam/evaluate` continues producing the current audit result. It additionally returns deterministic adaptive calls derived only from evaluated data:
 
 - readiness dashboard from overall/dimension scores
 - gap analysis from evaluated gaps
-- competency benchmark and skill radar from diagnostic conclusions
+- skill radar from diagnostic conclusions
+- competency benchmark only when a real Supabase/seed role benchmark is available
 - roadmap from the evaluated roadmap when available
 
-No score or gap is invented by the UI layer.
+No score, gap, or benchmark is invented by the UI layer.
 
 ## Frontend rendering
 
-Create an adaptive UI renderer registry under `src/components/adaptive-ui/` with one focused component per tool and a shared `AdaptiveToolSurface` container.
+`src/components/adaptive-ui/AdaptiveToolSurface.tsx` is a renderer registry with one focused component per tool.
 
 The surface:
 
@@ -70,7 +76,8 @@ The surface:
 - uses Framer Motion for enter/update transitions
 - is mobile-first within the existing 390px product frame
 - uses Pathwisse navy, slate, emerald, amber, and rose semantic states
-- exposes an action for `request_evidence_upload` that transitions to the existing `EVIDENCE_UPLOAD` step
+- renders `request_evidence_upload` as an inline proof-capture card so the interview component does not unmount mid-audit
+- stores adaptive proof metadata/URLs in the existing `EvidenceUploads` payload for later evaluation
 
 ## State ownership
 
@@ -79,14 +86,15 @@ The surface:
 ## Error handling
 
 - Unknown tool names are discarded server-side.
-- Malformed args are normalized to safe empty/default values rather than crashing the audit.
-- Tool rendering failures do not fail the chat/evaluation response.
-- Live tool acknowledgements are optional from the model's perspective; WebSocket errors continue through the existing error channel.
-- Adaptive UI never writes scores back into the evaluation model.
+- Model-provided scores are clamped to 0-100 and gap severities are normalized.
+- Malformed args degrade to safe defaults rather than crashing the audit.
+- Tool-planner failure returns `toolCalls: []` and does not fail the core chat response.
+- Live WebSocket errors continue through the existing error channel.
+- Adaptive UI never calculates or writes readiness scores back into the evaluation model.
 
-## Testing
+## Verification
 
-- Pure contract tests cover tool normalization, unknown-tool rejection, and post-evaluation tool generation.
-- TypeScript `npm run lint` remains the repository-wide type gate.
-- `npm run build` remains the production build gate.
-- Manual smoke cases: weak evidence triggers evidence upload; strong evaluated data updates readiness/gap/benchmark/roadmap cards; Live tool calls render without stopping audio events.
+- Focused contract test covers tool normalization, unknown-tool rejection, score clamping, severity normalization, and post-evaluation tool generation.
+- GitHub Actions installs dependencies and runs `npm test`.
+- TypeScript `npm run lint` is the repository-wide type gate.
+- `npm run build` verifies the production Vite and server bundle.
