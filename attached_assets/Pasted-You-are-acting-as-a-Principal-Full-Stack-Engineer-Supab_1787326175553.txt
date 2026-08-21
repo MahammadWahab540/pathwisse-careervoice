@@ -1,0 +1,1053 @@
+You are acting as a **Principal Full-Stack Engineer + Supabase Architect + AI Systems Engineer + Applied ML Engineer + QA Engineer**.
+
+Work directly against:
+
+`https://github.com/MahammadWahab540/pathwisse-careervoice`
+
+## Objective
+
+Convert CareerVoice from a partially functional UI/demo into a **real, evidence-driven career audit system**.
+
+Do not stop at analysis.
+
+Inspect the repository, implement the required frontend/backend/database changes, create migrations where needed, remove fake data, run the application, execute real end-to-end tests, fix failures, and verify the complete audit journey.
+
+The system must satisfy this principle:
+
+```text
+Student Answer
+→ Raw Evidence
+→ Extracted Skill Signal
+→ Competency Mapping
+→ Demonstrated Score
+→ Expected Score
+→ Skill Gap
+→ Readiness Score
+→ Recommendation
+→ Pathwisse Learning Action
+```
+
+Every score must be explainable from stored evidence.
+
+---
+
+# ARCHITECTURE DECISION
+
+For this implementation, keep the current architecture:
+
+```text
+Browser Speech Recognition / Text
+        ↓
+POST /api/qalam/chat
+        ↓
+Gemini structured extraction
+        ↓
+Supabase evidence persistence
+        ↓
+Deterministic scoring engine
+        ↓
+POST /api/qalam/evaluate
+        ↓
+Report
+```
+
+Do **not** migrate the production flow to Gemini Live yet.
+
+The current HTTP architecture is easier to test, persist, reproduce and audit.
+
+Keep `/live` isolated as an experimental future feature or place it behind a feature flag. Do not let Gemini Live complexity block the core CareerVoice system.
+
+---
+
+# P0. MAKE GEMINI REAL
+
+Inspect:
+
+* `server.ts`
+* `.env.example`
+* Railway/deployment environment configuration
+* `/api/health`
+* `/api/qalam/chat`
+* `/api/qalam/evaluate`
+
+## Requirements
+
+`GEMINI_API_KEY` must come exclusively from server environment variables.
+
+Never:
+
+* commit the key
+* expose it to Vite
+* send it to the browser
+* log it
+
+Update `.env.example` with:
+
+```text
+GEMINI_API_KEY=
+```
+
+Make `/api/health` expose:
+
+```json
+{
+  "status": "ok",
+  "geminiConfigured": true
+}
+```
+
+without exposing the key.
+
+### REMOVE FAKE AI FALLBACKS
+
+Currently `/api/qalam/chat` can fabricate:
+
+```text
+Core Knowledge
+Intermediate
+60
+```
+
+Remove this behavior.
+
+If Gemini is unavailable, return a proper service error such as:
+
+```json
+{
+  "error": "AI_SERVICE_UNAVAILABLE",
+  "message": "Career audit AI is temporarily unavailable."
+}
+```
+
+with an appropriate non-2xx HTTP status.
+
+Never fabricate skill evidence.
+
+The rule is:
+
+```text
+NO GEMINI
+→ NO SIGNAL
+→ NO SCORE
+```
+
+Test `/api/qalam/chat` with an actual answer such as:
+
+```text
+I built a React application using Supabase authentication and PostgreSQL.
+I implemented the login flow, RLS policies and deployed the frontend using Vercel.
+```
+
+Verify the endpoint returns meaningful extracted skills instead of `Core Knowledge`.
+
+Then run `/api/qalam/evaluate` using an actual completed audit payload and verify it returns successfully.
+
+---
+
+# P0. CREATE ONE CANONICAL EVIDENCE CONTRACT
+
+There is currently a contract mismatch between:
+
+`AdaptiveInterviewStep.tsx`
+
+and:
+
+`POST /api/audit/evidence/signal`
+
+Remove the mismatch completely.
+
+Create a shared TypeScript contract.
+
+Prefer something similar to:
+
+```ts
+interface SkillEvidenceSignal {
+  auditId: string;
+  studentId: string;
+  roleId: string;
+
+  skillName: string;
+
+  claimedLevel?: string;
+  extractedLevel: 'Beginner' | 'Intermediate' | 'Advanced';
+
+  confidenceScore: number;
+
+  evidenceStrength:
+    | 'None'
+    | 'Weak'
+    | 'Moderate'
+    | 'Strong';
+
+  rawAnswer: string;
+  evidenceSnippet: string;
+
+  questionId?: string;
+  source:
+    | 'voice_probe'
+    | 'typed_probe'
+    | 'project'
+    | 'uploaded_evidence';
+
+  createdAt?: string;
+}
+```
+
+The exact names can be adjusted if the existing DB architecture requires it, but there must be **one schema shared by frontend, backend and database**.
+
+Remove duplicate naming such as:
+
+```text
+evidenceLevel vs extractedLevel
+rawAnswerSnippet vs evidenceSnippet
+```
+
+---
+
+# P0. PERSIST THE ACTUAL EVIDENCE
+
+Update Supabase so `skill_signals` or the appropriate normalized evidence tables persist:
+
+```text
+audit_id
+student_id
+role_id
+skill_name
+claimed_level
+extracted_level
+confidence_score
+evidence_strength
+raw_answer
+evidence_snippet
+question_id
+source
+created_at
+```
+
+If schema changes are required:
+
+1. create a proper migration
+2. apply the migration
+3. preserve existing records
+4. add foreign keys where appropriate
+5. add indexes for audit_id, student_id, role_id and skill_name
+6. implement correct RLS
+
+Never identify production records using:
+
+```ts
+studentId: 'current_student'
+```
+
+Use the authenticated Supabase user/profile identity.
+
+Every persisted signal must point back to the actual audit session.
+
+---
+
+# P0. PERSIST AUDIT MESSAGES
+
+Every interview interaction should be persisted.
+
+Store:
+
+```text
+audit_id
+question_id
+sender
+message_text
+input_method
+sequence_number
+created_at
+```
+
+Example:
+
+```text
+audit_session
+   ↓
+audit_messages
+   ↓
+skill_signals
+```
+
+Do not rely purely on React state.
+
+Refreshing the browser must not destroy the audit history.
+
+---
+
+# P1. REMOVE FAKE ROLE MATCH SCORES
+
+Inspect:
+
+`src/components/audit/RoleDiscoveryStep.tsx`
+
+Remove:
+
+```ts
+idx === 0 ? '98% Match'
+idx === 1 ? '92% Match'
+'87% Match'
+```
+
+Replace it with real backend-generated role recommendations.
+
+Create something conceptually equivalent to:
+
+```text
+POST /api/roles/recommend
+```
+
+Input:
+
+```json
+{
+  "studentProfile": {},
+  "careerIntent": {},
+  "existingSkills": [],
+  "interests": [],
+  "academicContext": {}
+}
+```
+
+Output:
+
+```json
+[
+  {
+    "roleId": "...",
+    "roleTitle": "...",
+    "matchScore": 82,
+    "fitReasons": [
+      "...",
+      "..."
+    ],
+    "missingSignals": []
+  }
+]
+```
+
+The recommendation score must be deterministic enough to reproduce.
+
+Do not allow Gemini to invent arbitrary percentages.
+
+Gemini can provide natural-language reasoning, but the numeric role-fit score must come from application logic.
+
+---
+
+# P1. MAKE COMPETENCY MODELS BACKEND-DRIVEN
+
+Inspect:
+
+* `LoadCompetencyModelStep.tsx`
+* `src/data/knowledgeGraph.ts`
+* `server.ts`
+* `role_competencies`
+* `SEED_ROLE_COMPETENCIES`
+
+Currently the frontend initializes using:
+
+```ts
+getRoleCompetencyModel(...)
+```
+
+before the API responds.
+
+Remove this masking behavior.
+
+The UI should use:
+
+```text
+loading
+→ backend competency model
+→ render
+```
+
+If no competency exists for a production role:
+
+```text
+return configuration error
+```
+
+Do not silently show a fake competency model.
+
+Seed data may remain only for:
+
+```text
+development
+tests
+local bootstrap
+```
+
+It must not silently become production truth.
+
+---
+
+# P1. POPULATE ROLE COMPETENCIES
+
+Ensure every published target role has a competency model.
+
+Normalize the model if appropriate.
+
+Ideal structure:
+
+```text
+career_roles
+    ↓
+role_competencies
+    ↓
+role_competency_skills
+```
+
+Each role skill should contain fields such as:
+
+```text
+skill_id
+role_id
+expected_level
+expected_percentage
+importance_weight
+dependency_weight
+employability_weight
+category
+description
+```
+
+Weights must be explicit and data-driven.
+
+---
+
+# P1. BUILD DETERMINISTIC SKILL SCORING
+
+Gemini should extract evidence.
+
+Gemini should **not own the final numeric score**.
+
+Implement a scoring service/module.
+
+For every competency determine:
+
+```text
+expected_percentage
+demonstrated_percentage
+gap_percentage
+```
+
+Example evidence mapping:
+
+```text
+None       → 0
+Weak       → 25
+Moderate   → 60
+Strong     → 85
+```
+
+Adjust these values based on the existing model if needed.
+
+Also consider:
+
+```text
+confidence
+evidence quality
+multiple independent evidence signals
+project evidence
+```
+
+Create a deterministic weighted gap formula.
+
+For example:
+
+```text
+importance =
+importance_weight
+× dependency_weight
+× employability_weight
+
+raw_gap =
+max(expected_percentage - demonstrated_percentage, 0)
+
+weighted_gap =
+raw_gap × normalized_importance
+```
+
+Do not blindly copy this formula if repository structures provide a better canonical method.
+
+Document the implemented formula.
+
+---
+
+# P1. CAREER READINESS SCORE
+
+Calculate readiness from persisted competency evidence.
+
+Conceptually:
+
+```text
+Readiness =
+Σ(demonstrated competency × normalized competency weight)
+```
+
+Do not ask Gemini to generate the readiness percentage.
+
+Gemini may interpret the result after calculation.
+
+Add explicit status:
+
+```text
+85-100 → Ready
+70-84  → Nearly Ready
+45-69  → Developing
+0-44   → Early Stage
+```
+
+Put threshold values in configuration/constants, not scattered UI conditions.
+
+Return:
+
+```json
+{
+  "readinessScore": 74,
+  "readinessStatus": "Nearly Ready"
+}
+```
+
+---
+
+# P1. NO SCORE WITHOUT EVIDENCE
+
+Enforce the following invariant server-side:
+
+```text
+No evidence
+→ demonstrated score = 0 / unknown
+```
+
+Gemini commentary alone must never increase readiness.
+
+Every skill score must be traceable to one or more:
+
+```text
+skill_signal IDs
+```
+
+---
+
+# P2. BUILD THE EXPLAINABILITY DATA MODEL
+
+Persist the complete chain:
+
+```text
+answer
+↓
+evidence
+↓
+skill signal
+↓
+competency
+↓
+demonstrated score
+↓
+gap
+↓
+recommendation
+↓
+learning action
+```
+
+Create normalized relationships or equivalent traceable IDs.
+
+The report API should be able to answer:
+
+```text
+Why did this student receive 52% in SQL?
+```
+
+with something equivalent to:
+
+```text
+Expected: 80%
+Demonstrated: 52%
+
+Evidence:
+- Student described JOIN usage correctly
+- Could not explain indexing
+- No database project evidence supplied
+
+Signals:
+- SQL JOIN: Moderate
+- Indexing: Weak
+- Query optimization: None
+
+Result:
+28-point readiness gap
+```
+
+---
+
+# P2. COMPLETE THE REPORT
+
+Inspect:
+
+* `ReadinessReportView.tsx`
+* `GapReportView.tsx`
+* `DiagnosticChainCard.tsx`
+* report generation endpoints
+
+Implement a structured report with at least:
+
+```text
+1. Target Role
+2. Why This Role Fits
+3. Overall Career Readiness
+4. Strengths
+5. Skill-by-Skill Evidence
+6. Missing / Weak Evidence
+7. Skill Gaps
+8. Priority Improvements
+9. Recommended Pathwisse Roadmap
+```
+
+Create structured backend JSON.
+
+Example:
+
+```json
+{
+  "targetRole": {},
+  "roleFit": {},
+  "readiness": {},
+  "strengths": [],
+  "competencyResults": [],
+  "missingEvidence": [],
+  "priorityGaps": [],
+  "recommendations": [],
+  "roadmap": {}
+}
+```
+
+Do not make the frontend parse prose to discover these sections.
+
+---
+
+# P2. STRENGTHS
+
+Create a real strengths array based on evidence.
+
+Example:
+
+```json
+{
+  "skill": "React",
+  "demonstratedScore": 86,
+  "reason": "Student described component architecture and state management using evidence from a deployed project.",
+  "evidenceIds": ["..."]
+}
+```
+
+Only call something a strength when the stored evidence supports it.
+
+---
+
+# P2. PATHWISSE HANDOFF CONTRACT
+
+Remove dependence on:
+
+```text
+generateDefaultRoadmap()
+```
+
+for real completed audits.
+
+Build an explicit CareerVoice → Pathwisse contract.
+
+CareerVoice should output:
+
+```json
+{
+  "studentId": "...",
+  "targetRoleId": "...",
+  "auditId": "...",
+  "readinessScore": 54,
+  "prioritySkillGaps": [
+    {
+      "skillId": "...",
+      "skillName": "SQL",
+      "expectedScore": 80,
+      "demonstratedScore": 45,
+      "gapScore": 35,
+      "priority": 1
+    }
+  ]
+}
+```
+
+Pathwisse mapping should resolve:
+
+```text
+CareerVoice skill
+↓
+Pathwisse skill
+↓
+Roadmap phase
+↓
+Stage
+↓
+Topics
+↓
+Project / assignment
+```
+
+If the actual Pathwisse API is not available inside this repository, create a clean adapter/interface.
+
+For example:
+
+```ts
+interface PathwisseRoadmapProvider {
+  generateRoadmap(input: CareerAuditHandoff): Promise<PathwisseRoadmap>;
+}
+```
+
+Do not hardwire fake stages into report logic.
+
+---
+
+# P2. REMOVE OTHER FAKE FALLBACKS
+
+Search the entire repository for:
+
+```text
+98%
+92%
+87%
+Core Knowledge
+Intermediate
+60
+generateDefaultRoadmap
+SEED_
+fallback
+mock
+dummy
+hardcoded
+current_student
+anonymous
+```
+
+Classify every occurrence as:
+
+```text
+legitimate development fallback
+or
+production fake
+```
+
+Remove all production fakes.
+
+Never silently degrade from:
+
+```text
+real data
+```
+
+to:
+
+```text
+plausible-looking fake data
+```
+
+A configuration failure must look like a configuration failure.
+
+---
+
+# ADAPTIVE INTERVIEW IMPROVEMENT
+
+The current audit is fundamentally a fixed five-question flow with limited follow-up.
+
+Keep the five competency areas as a framework, but allow additional adaptive probes.
+
+The backend should decide:
+
+```text
+Strong evidence
+→ move forward
+
+Moderate evidence
+→ optional clarification
+
+Weak evidence
+→ targeted follow-up
+
+No evidence
+→ probe once or twice
+→ record missing evidence
+→ move forward
+```
+
+Prevent infinite questioning.
+
+Recommended maximum:
+
+```text
+2 follow-ups per competency
+```
+
+Persist every question and response.
+
+---
+
+# VALIDATION
+
+Validate all API request bodies.
+
+Use a shared schema library if already available, otherwise introduce something lightweight such as Zod.
+
+At minimum validate:
+
+```text
+audit IDs
+user IDs
+role IDs
+skill names/IDs
+confidence 0-100
+evidence strength enum
+readiness score 0-100
+```
+
+Reject malformed requests rather than inserting partial rows.
+
+---
+
+# ERROR HANDLING
+
+Do not swallow database errors with:
+
+```ts
+console.warn(...)
+res.json({ success: true })
+```
+
+If persistence fails, the API must return failure.
+
+Example:
+
+```json
+{
+  "success": false,
+  "error": "EVIDENCE_PERSISTENCE_FAILED"
+}
+```
+
+The client must know whether evidence was actually saved.
+
+---
+
+# SECURITY
+
+Verify:
+
+* Supabase RLS
+* authenticated user ownership
+* audit ownership
+* report ownership
+* students cannot read other students' evidence
+* students cannot change calculated readiness scores directly
+* service-role key never reaches browser
+* Gemini API key never reaches browser
+* server-generated scores cannot be overridden by request payloads
+
+---
+
+# TESTS
+
+Add automated tests for at least:
+
+### AI
+
+1. Gemini missing → correct error, no fake evidence
+2. Gemini configured → real skill extraction
+3. vague answer → weak evidence + follow-up
+4. detailed project answer → moderate/strong evidence
+5. malformed AI output handled safely
+
+### Evidence
+
+6. canonical evidence contract accepted
+7. missing required fields rejected
+8. raw answer persisted
+9. evidence snippet persisted
+10. signal linked to correct audit
+11. DB failure does not return success
+
+### Role recommendations
+
+12. no hardcoded 98/92/87
+13. same profile produces deterministic match score
+14. materially different profile changes ranking
+
+### Competencies
+
+15. competency loaded from Supabase
+16. missing production competency produces explicit error
+17. all published roles have competency definitions
+
+### Scoring
+
+18. no evidence → no demonstrated readiness
+19. strong evidence raises demonstrated score
+20. gap = expected − demonstrated
+21. competency weights are applied correctly
+22. readiness score is deterministic
+23. readiness status thresholds work
+
+### Explainability
+
+24. report skill score links back to evidence
+25. report strengths have evidence IDs
+26. missing evidence appears explicitly
+
+### Pathwisse
+
+27. gaps generate handoff payload
+28. handoff uses real skill identifiers
+29. roadmap fallback is not used for completed production audits
+
+### E2E
+
+30. student onboarding
+31. role recommendation
+32. target role confirmation
+33. competency model load
+34. voice/typed interview
+35. adaptive follow-up
+36. evidence persistence
+37. evaluation
+38. deterministic readiness calculation
+39. report generation
+40. roadmap handoff
+
+---
+
+# REAL END-TO-END TEST
+
+After implementation, execute one complete audit.
+
+Use a realistic student answer set.
+
+Example role:
+
+```text
+Full Stack Developer
+```
+
+Include deliberately mixed evidence:
+
+```text
+Strong React evidence
+Moderate Supabase evidence
+Weak SQL optimization evidence
+No system-design evidence
+```
+
+Then verify manually in Supabase:
+
+```text
+audit session exists
+messages exist
+raw answers exist
+skill signals exist
+competency mappings exist
+scores exist
+gaps exist
+report exists
+handoff exists
+```
+
+Verify that changing the answers changes the scores.
+
+That is critical.
+
+A report that produces roughly identical scores regardless of evidence is considered broken.
+
+---
+
+# IMPLEMENTATION ORDER
+
+Execute strictly in this order:
+
+```text
+1. Gemini configuration + health
+2. Remove fake AI fallback
+3. Canonical evidence contract
+4. Evidence persistence
+5. Audit/message persistence
+6. Backend competency source
+7. Role competency coverage
+8. Real role recommendation scoring
+9. Deterministic evidence scoring
+10. Skill-gap calculation
+11. Readiness score + status
+12. Explainability chain
+13. Structured final report
+14. Pathwisse handoff
+15. Remove remaining production fallbacks
+16. Automated tests
+17. Full E2E verification
+```
+
+Do not start cosmetic UI work before P0 is functioning.
+
+---
+
+# DEFINITION OF DONE
+
+The implementation is complete only when:
+
+```text
+✓ Gemini successfully evaluates a real audit
+✓ No fabricated Core Knowledge signal exists
+✓ No hardcoded role match percentages exist
+✓ Raw answers are persisted
+✓ Every skill signal references evidence
+✓ Competency models come from backend/Supabase
+✓ Scores are deterministic
+✓ Gemini does not own numeric readiness scoring
+✓ Readiness has explicit status
+✓ Strengths are evidence-backed
+✓ Missing evidence is visible
+✓ Gap calculations are reproducible
+✓ Explainability chain is persisted
+✓ Report is structured
+✓ CareerVoice produces a Pathwisse handoff payload
+✓ No silent production fake-data fallback remains
+✓ E2E audit completes successfully
+✓ Tests pass
+```
+
+## Final deliverable
+
+Do not respond merely with recommendations.
+
+Actually implement the changes.
+
+At completion provide:
+
+```text
+1. Files changed
+2. Database migrations created/applied
+3. New/changed API contracts
+4. Scoring formula implemented
+5. Fake/hardcoded data removed
+6. Gemini verification results
+7. Supabase persistence verification
+8. Automated test results
+9. E2E test result
+10. Remaining risks
+11. Commit SHA
+12. PR link
+```
+
+If you encounter a failure during implementation, diagnose and fix it before proceeding wherever technically possible.
+
+The final standard is:
+
+**CareerVoice must never tell a student they are career-ready unless the system can show the exact evidence that caused that conclusion.**
