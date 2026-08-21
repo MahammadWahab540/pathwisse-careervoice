@@ -9,6 +9,9 @@ export type EvidenceSource =
 
 export type ReadinessStatus = 'Ready' | 'Nearly Ready' | 'Developing' | 'Early Stage';
 export type GapPriority = 'Critical' | 'High' | 'Medium' | 'Low';
+export type ScoreStatus = 'SCORED' | 'INSUFFICIENT_EVIDENCE';
+export type EvidenceCoverageLabel = 'Strong' | 'Moderate' | 'Weak Evidence' | 'Insufficient Evidence';
+export type RecommendationType = 'Strong Direction' | 'Worth Exploring' | 'Alternative Path';
 
 export interface SkillSignalInput {
   auditId: string;
@@ -22,11 +25,13 @@ export interface SkillSignalInput {
   rawAnswerSnippet: string;
   source: EvidenceSource;
   sourceMessageId?: string;
+  evidenceId?: string;
   idempotencyKey?: string;
 }
 
 export interface CompetencyBenchmark {
   skillId: string;
+  skillSlug?: string;
   skillName: string;
   category: string;
   expectedScore: number;
@@ -34,6 +39,11 @@ export interface CompetencyBenchmark {
   dependencyWeight: number;
   employabilityWeight: number;
   requiredLevel?: string;
+  minimumEvidenceThreshold: number;
+  minimumEvidenceStrength: 'Moderate' | 'Strong';
+  evidenceRequirements?: Record<string, unknown>;
+  evaluationRubric?: Record<string, unknown>;
+  probeGuidance?: Record<string, unknown>;
   pathwisseSkillId?: string | null;
   recommendedStageIds?: string[];
 }
@@ -50,17 +60,40 @@ export interface ScoringSignal {
 export interface DeterministicSkillScore {
   skillId: string;
   skillName: string;
-  demonstratedScore: number;
+  status: ScoreStatus;
+  demonstratedScore: number | null;
+  primarySignalId: string | null;
+  primaryEvidenceId: string | null;
   signalIds: string[];
   evidenceIds: string[];
 }
 
-export interface DeterministicSkillGap extends DeterministicSkillScore {
+export interface DeterministicSkillGap {
+  skillId: string;
+  skillName: string;
   expectedScore: number;
+  demonstratedScore: number;
   gap: number;
   priorityWeight: number;
   weightedGap: number;
   priority: GapPriority;
+  signalIds: string[];
+  evidenceIds: string[];
+}
+
+export interface EvidenceCoverageItem {
+  skillId: string;
+  skillSlug: string;
+  skillName: string;
+  expectedScore: number;
+  requiredLevel?: string;
+  coverage: EvidenceCoverageLabel;
+  scoreStatus: ScoreStatus;
+  demonstratedScore: number | null;
+  confidenceScore: number | null;
+  evidenceStrength: EvidenceStrength;
+  primarySignalId: string | null;
+  primaryEvidenceId: string | null;
 }
 
 export interface DimensionScores {
@@ -96,6 +129,40 @@ export const READINESS_THRESHOLDS = {
   developing: 45,
 } as const;
 
+export interface StudentCareerProfile {
+  education: string;
+  branch: string;
+  academicYear: string;
+  interests: string[];
+  technicalSkills: string[];
+  nontechnicalStrengths: string[];
+  projects: string[];
+  internships: string[];
+  workExperience: string[];
+  preferredWork: string;
+  enjoyedProblems: string;
+  analyticalInclination: string;
+  technicalInclination: string;
+  communicationInclination: string;
+  leadershipInclination: string;
+  careerAspirations: string;
+}
+
+export interface RoleDirectionRole {
+  roleId: string;
+  title: string;
+  category: string;
+  keySkills: string[];
+}
+
+export interface RoleDirectionResult {
+  roleId: string;
+  recommendationType: RecommendationType;
+  reasons: string[];
+  supportingEvidence: string[];
+}
+
+// Compatibility types retained only while older call sites migrate to calculateRoleDirection.
 export interface RoleFitProfile {
   careerIntent: string;
   branch: string;
@@ -139,6 +206,13 @@ const EVIDENCE_MULTIPLIER: Record<EvidenceStrength, number> = {
   Moderate: 0.8,
   Weak: 0.55,
   None: 0,
+};
+
+const EVIDENCE_RANK: Record<EvidenceStrength, number> = {
+  None: 0,
+  Weak: 1,
+  Moderate: 2,
+  Strong: 3,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -190,6 +264,7 @@ export function parseSkillSignalInput(input: unknown): SkillSignalInput {
     rawAnswerSnippet: requiredString(input.rawAnswerSnippet, 'rawAnswerSnippet'),
     source,
     sourceMessageId: optionalString(input.sourceMessageId, 'sourceMessageId'),
+    evidenceId: optionalString(input.evidenceId, 'evidenceId'),
     idempotencyKey: optionalString(input.idempotencyKey, 'idempotencyKey'),
   };
 }
@@ -208,6 +283,15 @@ export function scoreSignal(signal: ScoringSignal): number {
   return Math.round(levelScore * EVIDENCE_MULTIPLIER[signal.evidenceStrength] * confidenceFactor);
 }
 
+export function isSignalSufficient(benchmark: CompetencyBenchmark, signal: ScoringSignal): boolean {
+  const requiredRank = EVIDENCE_RANK[benchmark.minimumEvidenceStrength];
+  return (
+    EVIDENCE_RANK[signal.evidenceStrength] >= requiredRank &&
+    signal.confidenceScore >= benchmark.minimumEvidenceThreshold &&
+    Boolean(signal.evidenceId)
+  );
+}
+
 export function calculateSkillScore(
   benchmark: CompetencyBenchmark,
   signals: ScoringSignal[]
@@ -215,17 +299,35 @@ export function calculateSkillScore(
   const matching = signals.filter(
     (signal) => signal.skillName.trim().toLowerCase() === benchmark.skillName.trim().toLowerCase()
   );
-
-  const ranked = matching
+  const sufficient = matching
+    .filter((signal) => isSignalSufficient(benchmark, signal))
     .map((signal) => ({ signal, score: scoreSignal(signal) }))
-    .sort((a, b) => b.score - a.score || a.signal.id.localeCompare(b.signal.id));
+    .sort((a, b) => b.score - a.score || b.signal.confidenceScore - a.signal.confidenceScore || a.signal.id.localeCompare(b.signal.id));
 
-  const bestScore = ranked[0]?.score ?? 0;
+  const best = sufficient[0];
+  if (!best) {
+    return {
+      skillId: benchmark.skillId,
+      skillName: benchmark.skillName,
+      status: 'INSUFFICIENT_EVIDENCE',
+      demonstratedScore: null,
+      primarySignalId: null,
+      primaryEvidenceId: null,
+      signalIds: matching.map((signal) => signal.id).sort(),
+      evidenceIds: matching
+        .map((signal) => signal.evidenceId)
+        .filter((id): id is string => Boolean(id))
+        .sort(),
+    };
+  }
 
   return {
     skillId: benchmark.skillId,
     skillName: benchmark.skillName,
-    demonstratedScore: bestScore,
+    status: 'SCORED',
+    demonstratedScore: best.score,
+    primarySignalId: best.signal.id,
+    primaryEvidenceId: best.signal.evidenceId || null,
     signalIds: matching.map((signal) => signal.id).sort(),
     evidenceIds: matching
       .map((signal) => signal.evidenceId)
@@ -270,6 +372,58 @@ export function calculateSkillGap(
   };
 }
 
+export function buildEvidenceCoverage(
+  competencies: CompetencyBenchmark[],
+  signals: ScoringSignal[]
+): EvidenceCoverageItem[] {
+  return competencies.map((competency) => {
+    const matching = signals
+      .filter((signal) => signal.skillName.trim().toLowerCase() === competency.skillName.trim().toLowerCase())
+      .sort((a, b) => EVIDENCE_RANK[b.evidenceStrength] - EVIDENCE_RANK[a.evidenceStrength] || b.confidenceScore - a.confidenceScore);
+    const strongest = matching[0];
+    const score = calculateSkillScore(competency, matching);
+    let coverage: EvidenceCoverageLabel = 'Insufficient Evidence';
+    if (strongest) {
+      if (score.status === 'INSUFFICIENT_EVIDENCE') coverage = 'Weak Evidence';
+      else coverage = strongest.evidenceStrength === 'Strong' ? 'Strong' : 'Moderate';
+    }
+
+    return {
+      skillId: competency.skillId,
+      skillSlug: competency.skillSlug || normalizeToken(compentencyName(competency)),
+      skillName: competency.skillName,
+      expectedScore: competency.expectedScore,
+      requiredLevel: competency.requiredLevel,
+      coverage,
+      scoreStatus: score.status,
+      demonstratedScore: score.demonstratedScore,
+      confidenceScore: strongest?.confidenceScore ?? null,
+      evidenceStrength: strongest?.evidenceStrength ?? 'None',
+      primarySignalId: score.primarySignalId,
+      primaryEvidenceId: score.primaryEvidenceId,
+    };
+  });
+}
+
+function compentencyName(competency: CompetencyBenchmark): string {
+  return competency.skillName;
+}
+
+export function selectNextCompetency(
+  competencies: CompetencyBenchmark[],
+  signals: ScoringSignal[]
+): CompetencyBenchmark | null {
+  const coverage = new Map(buildEvidenceCoverage(competencies, signals).map((item) => [item.skillId, item]));
+  const candidates = competencies
+    .filter((competency) => coverage.get(competency.skillId)?.scoreStatus !== 'SCORED')
+    .sort((a, b) => {
+      const weightA = Math.max(0, a.importanceWeight) * Math.max(0, a.employabilityWeight) * Math.max(0, a.dependencyWeight);
+      const weightB = Math.max(0, b.importanceWeight) * Math.max(0, b.employabilityWeight) * Math.max(0, b.dependencyWeight);
+      return weightB - weightA || a.skillName.localeCompare(b.skillName);
+    });
+  return candidates[0] || null;
+}
+
 export function calculateOverallReadiness(
   dimensions: DimensionScores,
   weights: ReadinessWeights = DEFAULT_READINESS_WEIGHTS
@@ -286,11 +440,16 @@ export function calculateOverallReadiness(
   return Math.round(weighted / totalWeight);
 }
 
+function normalizeToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.]+/g, ' ')
+    .trim();
+}
+
 function tokenize(value: string): Set<string> {
   return new Set(
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9+#.]+/g, ' ')
+    normalizeToken(value)
       .split(/\s+/)
       .map((token) => token.trim())
       .filter((token) => token.length >= 2)
@@ -307,8 +466,8 @@ function tokenOverlap(left: string, right: string): number {
 }
 
 function skillMatches(known: string, required: string): boolean {
-  const knownNormalized = known.trim().toLowerCase();
-  const requiredNormalized = required.trim().toLowerCase();
+  const knownNormalized = normalizeToken(known);
+  const requiredNormalized = normalizeToken(required);
   return (
     knownNormalized === requiredNormalized ||
     knownNormalized.includes(requiredNormalized) ||
@@ -317,42 +476,100 @@ function skillMatches(known: string, required: string): boolean {
   );
 }
 
-export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): RoleFitResult {
-  const roleDescriptor = `${role.title} ${role.category} ${role.keySkills.join(' ')}`;
-  const intentOverlap = tokenOverlap(profile.careerIntent, roleDescriptor);
-  const intentScore = Math.round(Math.min(1, intentOverlap * 1.8) * 45);
-
-  const softwareRole = /(engineer|developer|data|cloud|devops|security|machine learning|ai|software)/i.test(
-    `${role.title} ${role.category}`
-  );
-  const softwareBranch = /(computer|information technology|software|electronics|ece|data|ai|machine learning)/i.test(
-    profile.branch
-  );
-  const exactBranchOverlap = tokenOverlap(profile.branch, role.category);
-  const academicScore = exactBranchOverlap >= 0.3 ? 20 : softwareRole && softwareBranch ? 17 : 5;
-
+export function calculateRoleDirection(profile: StudentCareerProfile, role: RoleDirectionRole): RoleDirectionResult {
   const matchedSkills = role.keySkills.filter((required) =>
-    profile.knownSkills.some((known) => skillMatches(known, required))
+    profile.technicalSkills.some((known) => skillMatches(known, required))
   );
-  const skillScore = role.keySkills.length === 0 ? 0 : Math.round((matchedSkills.length / role.keySkills.length) * 30);
+  const aspirationText = `${profile.careerAspirations} ${profile.preferredWork} ${profile.interests.join(' ')} ${profile.enjoyedProblems}`;
+  const roleDescriptor = `${role.title} ${role.category} ${role.keySkills.join(' ')}`;
+  const aspirationAligned = tokenOverlap(aspirationText, roleDescriptor) > 0;
+  const technicalContext = /high|strong|technical|build|engineer|code|data|system|design/i.test(
+    `${profile.technicalInclination} ${profile.preferredWork} ${profile.enjoyedProblems}`
+  );
+  const projectEvidence = profile.projects.filter(Boolean).slice(0, 2);
+  const experienceEvidence = [...profile.internships, ...profile.workExperience].filter(Boolean).slice(0, 2);
 
-  const preferenceScore = profile.careerIntent.trim().length > 0 && intentOverlap > 0 ? 5 : 0;
-  const matchScore = Math.max(0, Math.min(100, intentScore + academicScore + skillScore + preferenceScore));
+  const reasons: string[] = [];
+  const supportingEvidence: string[] = [];
+  if (aspirationAligned) {
+    reasons.push(`Your stated interests and preferred work align with ${role.title}.`);
+    supportingEvidence.push(profile.careerAspirations || profile.preferredWork);
+  }
+  if (matchedSkills.length > 0) {
+    reasons.push(`You already report relevant exposure in ${matchedSkills.slice(0, 3).join(', ')}.`);
+    supportingEvidence.push(...matchedSkills.map((skill) => `Reported skill: ${skill}`));
+  }
+  if (projectEvidence.length > 0) {
+    reasons.push('Your project history gives Qalam concrete material to validate for this direction.');
+    supportingEvidence.push(...projectEvidence);
+  }
+  if (experienceEvidence.length > 0) {
+    reasons.push('Your internship or work history adds relevant context for this role family.');
+    supportingEvidence.push(...experienceEvidence);
+  }
+  if (technicalContext && /engineer|developer|data|cloud|security|software|bim|cad/i.test(`${role.title} ${role.category}`)) {
+    reasons.push('Your preferred problem-solving style is compatible with the technical nature of this role.');
+    supportingEvidence.push(`Technical inclination: ${profile.technicalInclination}`);
+  }
 
-  const fitBand: RoleFitResult['fitBand'] =
-    matchScore >= 75
-      ? 'Strong Fit'
-      : matchScore >= 60
-      ? 'Good Fit'
-      : matchScore >= 40
-      ? 'Exploratory Fit'
-      : 'Stretch Fit';
+  const evidenceSignals = [
+    aspirationAligned,
+    matchedSkills.length >= Math.min(2, Math.max(1, role.keySkills.length)),
+    projectEvidence.length > 0,
+    experienceEvidence.length > 0,
+    technicalContext,
+  ].filter(Boolean).length;
 
-  const fitReasons: string[] = [];
-  if (intentScore >= 20) fitReasons.push(`Your stated career intent aligns with ${role.title}.`);
-  if (academicScore >= 17) fitReasons.push(`Your ${profile.branch} background is relevant to this role family.`);
-  if (matchedSkills.length > 0) fitReasons.push(`You already show overlap in ${matchedSkills.slice(0, 3).join(', ')}.`);
-  if (fitReasons.length === 0) fitReasons.push('This role is a stretch based on the evidence currently available.');
+  const recommendationType: RecommendationType =
+    evidenceSignals >= 3 && matchedSkills.length >= Math.min(2, Math.max(1, role.keySkills.length))
+      ? 'Strong Direction'
+      : evidenceSignals >= 2
+        ? 'Worth Exploring'
+        : 'Alternative Path';
 
-  return { roleId: role.roleId, matchScore, fitBand, fitReasons };
+  if (reasons.length === 0) {
+    reasons.push('Current discovery evidence is limited, so this is an alternative direction rather than a readiness claim.');
+    supportingEvidence.push('No strong discovery evidence yet');
+  }
+
+  return {
+    roleId: role.roleId,
+    recommendationType,
+    reasons,
+    supportingEvidence: supportingEvidence.filter(Boolean).slice(0, 6),
+  };
+}
+
+/**
+ * @deprecated Use calculateRoleDirection. This compatibility helper must not be rendered as a match percentage.
+ */
+export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): RoleFitResult {
+  const direction = calculateRoleDirection(
+    {
+      education: '',
+      branch: profile.branch,
+      academicYear: '',
+      interests: [profile.careerIntent],
+      technicalSkills: profile.knownSkills,
+      nontechnicalStrengths: [],
+      projects: [],
+      internships: [],
+      workExperience: [],
+      preferredWork: profile.careerIntent,
+      enjoyedProblems: profile.careerIntent,
+      analyticalInclination: '',
+      technicalInclination: '',
+      communicationInclination: '',
+      leadershipInclination: '',
+      careerAspirations: profile.careerIntent,
+    },
+    role
+  );
+  const matchScore = direction.recommendationType === 'Strong Direction' ? 80 : direction.recommendationType === 'Worth Exploring' ? 60 : 35;
+  return {
+    roleId: role.roleId,
+    matchScore,
+    fitBand: direction.recommendationType === 'Strong Direction' ? 'Strong Fit' : direction.recommendationType === 'Worth Exploring' ? 'Exploratory Fit' : 'Stretch Fit',
+    fitReasons: direction.reasons,
+  };
 }
