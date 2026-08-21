@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { float32ToPcmBase64, pcmBase64ToFloat32, calculateRmsAmplitude } from '../utils/audioPcm';
+import type { QalamToolCall } from '../ai/qalamTools';
 
 interface UseGeminiLiveOptions {
   onInputText?: (text: string) => void;
   onOutputText?: (text: string) => void;
+  onToolCall?: (calls: QalamToolCall[]) => void;
   onError?: (err: string) => void;
 }
 
@@ -157,6 +159,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions = {}) {
           } else if (msg.type === 'inputText' && msg.text) {
             setLastInputTranscript((prev) => prev + msg.text);
             options.onInputText?.(msg.text);
+          } else if (msg.type === 'toolCall' && Array.isArray(msg.calls)) {
+            options.onToolCall?.(msg.calls as QalamToolCall[]);
           } else if (msg.type === 'error') {
             setError(msg.error);
             options.onError?.(msg.error);
@@ -184,13 +188,30 @@ export function useGeminiLive(options: UseGeminiLiveOptions = {}) {
       setError(err.message || 'Microphone access denied');
       setIsConnecting(false);
     }
-  }, [isConnecting, playAudioChunk, stopAllOutputAudio, options]);
+  }, [isConnecting, isLiveSpeaking, playAudioChunk, stopAllOutputAudio, options]);
 
   // Send textual input over Live session
   const sendTextMessage = useCallback((text: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ text }));
       setLastInputTranscript(text);
+    }
+  }, []);
+
+  // Acknowledge a rendered Live tool call back to Gemini.
+  const sendToolResult = useCallback((
+    callId: string,
+    name: string,
+    result: Record<string, unknown> = { rendered: true },
+  ) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        toolResult: {
+          id: callId,
+          name,
+          result,
+        },
+      }));
     }
   }, []);
 
@@ -248,5 +269,6 @@ export function useGeminiLive(options: UseGeminiLiveOptions = {}) {
     startLiveSession,
     stopLiveSession,
     sendTextMessage,
+    sendToolResult,
   };
 }
