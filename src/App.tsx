@@ -43,7 +43,6 @@ import {
   EvidenceUploads,
   CareerAuditResult,
 } from './types';
-import { RotateCcw, Database } from 'lucide-react';
 
 type AuditStep =
   | 'WELCOME'
@@ -224,39 +223,6 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-[#0b111e] flex flex-col font-sans selection:bg-[#1f3861] selection:text-white">
-      {/* Clean Header Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-white/95 border-b border-[#e1e7ef] backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-2.5 cursor-pointer" onClick={handleRestartAudit}>
-          <div className="w-8 h-8 rounded-full bg-[#1f3861] flex items-center justify-center font-bold text-white text-xs shadow-xs">
-            P
-          </div>
-          <div>
-            <h1 className="text-sm sm:text-base font-extrabold text-[#0b111e] leading-tight tracking-tight">
-              Pathwisse <span className="text-[#1f3861]">Qalam</span>
-            </h1>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsSupabaseOpen(true)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 transition shadow-2xs cursor-pointer"
-            title="Supabase BaaS Status & Schema"
-          >
-            <Database className="w-3.5 h-3.5 text-emerald-600" />
-            <span className="hidden sm:inline">Supabase</span> BaaS
-          </button>
-
-          <button
-            onClick={handleRestartAudit}
-            className="p-2 rounded-full bg-white border border-[#e1e7ef] text-[#344256] hover:text-[#0b111e] hover:bg-[#f8fafc] transition shadow-xs cursor-pointer"
-            title="Restart Audit"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
       {/* Mobile-first Product Frame Container */}
       <main className="flex-1 flex items-center justify-center p-2 sm:p-4 my-auto">
         <div className="w-full max-w-[390px] min-h-[780px] border border-[#e1e7ef] rounded-[28px] bg-white shadow-xl shadow-slate-200/50 overflow-hidden relative flex flex-col justify-between">
