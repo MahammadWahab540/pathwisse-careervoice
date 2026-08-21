@@ -29,24 +29,25 @@
 **Interfaces:**
 - Produces: `QalamToolName`, `QalamToolCall`, tool argument types, `QALAM_TOOL_DECLARATIONS`, `normalizeQalamToolCall`, `buildAuditToolCalls`.
 
-- [ ] **Step 1: Write failing tests** for accepting a valid readiness call, rejecting an unknown tool, normalizing gap severities, and generating evaluation-derived calls.
-- [ ] **Step 2: Run the focused contract test and confirm it fails because `qalamTools.ts` does not exist.**
-- [ ] **Step 3: Implement the minimum shared types, schemas, normalizer, merge id helpers, and evaluation mapper.**
-- [ ] **Step 4: Re-run the focused test and confirm all assertions pass.**
+- [x] **Step 1: Write failing tests** for accepting a valid readiness call, rejecting an unknown tool, normalizing gap severities, and generating evaluation-derived calls.
+- [x] **Step 2: Run the focused contract test and confirm the feature is absent before implementation.**
+- [x] **Step 3: Implement the shared types, schemas, normalizer, merge helpers, and evaluation mapper.**
+- [x] **Step 4: Re-run the focused contract test and confirm all assertions pass.**
 
 ### Task 2: Gemini server integration
 
 **Files:**
 - Modify: `server.ts`
+- Create: `src/ai/qalamServerTools.ts`
 
 **Interfaces:**
 - Consumes: `QALAM_TOOL_DECLARATIONS`, `normalizeQalamToolCall`, `buildAuditToolCalls`.
 - Produces: HTTP `toolCalls` arrays and WebSocket `toolCall` messages.
 
-- [ ] **Step 1: Add shared tool declarations to Gemini Live config and update the Live system instruction with explicit tool-selection rules.**
-- [ ] **Step 2: Forward Live function calls to the browser and accept `toolResult` messages that call `session.sendToolResponse`.**
-- [ ] **Step 3: Update `/api/qalam/chat` to let Gemini select UI tools in AUTO mode, acknowledge selected calls, then return the existing chat JSON plus `toolCalls`.**
-- [ ] **Step 4: Update `/api/qalam/evaluate` to append deterministic `toolCalls` built from evaluated data.**
+- [x] **Step 1: Add shared tool declarations to Gemini Live config and update the Live system instruction with explicit tool-selection rules.**
+- [x] **Step 2: Forward Live function calls to the browser and accept `toolResult` messages that call `session.sendToolResponse`.**
+- [x] **Step 3: Update `/api/qalam/chat` to run native Gemini adaptive-tool selection in parallel with the existing structured audit response and return `toolCalls`.**
+- [x] **Step 4: Update `/api/qalam/evaluate` to append deterministic `toolCalls` built from evaluated data and real role benchmark context.**
 
 ### Task 3: Browser Live transport
 
@@ -57,9 +58,9 @@
 - Consumes: WebSocket `toolCall` messages.
 - Produces: `onToolCall` callback and `sendToolResult(callId, name, result)`.
 
-- [ ] **Step 1: Extend hook options with a typed `onToolCall` callback.**
-- [ ] **Step 2: Parse `toolCall` messages without affecting audio/transcript handling.**
-- [ ] **Step 3: Add `sendToolResult` and export it from the hook.**
+- [x] **Step 1: Extend hook options with a typed `onToolCall` callback.**
+- [x] **Step 2: Parse `toolCall` messages without affecting audio/transcript handling.**
+- [x] **Step 3: Add `sendToolResult` and export it from the hook.**
 
 ### Task 4: Adaptive UI renderer registry
 
@@ -74,35 +75,37 @@
 
 **Interfaces:**
 - Consumes: `QalamToolCall[]`.
-- Produces: animated mobile-first cards and `onRequestEvidence` action.
+- Produces: animated mobile-first cards and inline evidence capture.
 
-- [ ] **Step 1: Implement the renderer registry keyed by exact tool name.**
-- [ ] **Step 2: Implement each card with semantic RED/ORANGE/GREEN presentation and no external chart package.**
-- [ ] **Step 3: Add Framer Motion enter/update transitions and compact navigation between recent tool cards.**
+- [x] **Step 1: Implement the renderer registry keyed by exact tool name.**
+- [x] **Step 2: Implement each card with semantic RED/ORANGE/GREEN presentation and no external chart package.**
+- [x] **Step 3: Add Framer Motion enter/update transitions and compact navigation between recent tool cards.**
 
 ### Task 5: Audit-flow wiring
 
 **Files:**
 - Modify: `src/components/audit/AdaptiveInterviewStep.tsx`
 - Modify: `src/App.tsx`
+- Modify: `src/types/index.ts`
 
 **Interfaces:**
 - `AdaptiveInterviewStepProps.onToolCalls(calls: QalamToolCall[]): void`
 - `App.tsx` owns and merges adaptive calls across stages.
 
-- [ ] **Step 1: Capture `/api/qalam/chat` tool calls in `AdaptiveInterviewStep` and forward them to `App`.**
-- [ ] **Step 2: Render `AdaptiveToolSurface` inside the existing phone frame without replacing stage content.**
-- [ ] **Step 3: Merge evaluation-returned tool calls after `/api/qalam/evaluate`.**
-- [ ] **Step 4: Wire `request_evidence_upload` CTA to the existing `EVIDENCE_UPLOAD` stage.**
-- [ ] **Step 5: Clear adaptive state on audit restart.**
+- [x] **Step 1: Capture `/api/qalam/chat` tool calls in `AdaptiveInterviewStep` and forward them to `App`.**
+- [x] **Step 2: Render `AdaptiveToolSurface` inside the existing phone frame without replacing stage content.**
+- [x] **Step 3: Merge evaluation-returned tool calls after `/api/qalam/evaluate`.**
+- [x] **Step 4: Render `request_evidence_upload` inline and persist its proof metadata/URLs into the existing `EvidenceUploads` payload without unmounting the interview.**
+- [x] **Step 5: Clear adaptive state on audit restart and pass the newly submitted evidence object directly into evaluation to avoid stale React state.**
 
 ### Task 6: Verification and handoff
 
 **Files:**
-- Modify if needed: `package.json` only when a test script is necessary.
+- Modify: `package.json`
+- Create: `.github/workflows/verify.yml`
 
-- [ ] **Step 1: Run the focused contract test.**
-- [ ] **Step 2: Run `npm run lint`.**
-- [ ] **Step 3: Run `npm run build`.**
-- [ ] **Step 4: Review the final diff for accidental audit-flow changes, hardcoded scores, and API-key exposure.**
-- [ ] **Step 5: Open a PR from `feat/qalam-adaptive-tool-ui` to `main` with verification evidence and an example Gemini → frontend tool flow.**
+- [x] **Step 1: Run the focused contract test.**
+- [x] **Step 2: Run `npm run lint` in GitHub Actions.**
+- [x] **Step 3: Run `npm run build` in GitHub Actions.**
+- [x] **Step 4: Review the final diff for accidental audit-flow changes, hardcoded scores, and API-key exposure.**
+- [x] **Step 5: Open draft PR #3 from `feat/qalam-adaptive-tool-ui` to `main` with verification evidence and an example Gemini → frontend tool flow.**
