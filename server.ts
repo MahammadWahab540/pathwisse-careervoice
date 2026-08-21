@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { GoogleGenAI, Type, Modality, LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
@@ -27,7 +28,7 @@ import {
 } from './src/ai/qalamServerTools';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 5000);
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -604,7 +605,7 @@ Format output as valid JSON matching this schema:
         await supabase.from('career_audits').insert({
           audit_id: auditId,
           phone: phone || studentContext?.phone || 'anonymous',
-          target_role_title: targetRole,
+          target_role: targetRole,
           overall_score: parsed.overallScore || 0,
           dimension_scores: parsed.dimensionScores || {},
           diagnosis_summary: parsed.diagnosisSummary || '',
@@ -612,7 +613,6 @@ Format output as valid JSON matching this schema:
           gaps: parsed.gaps || [],
           roadmap: parsed.roadmap || [],
           evidence_data: evidenceData || {},
-          status: 'COMPLETED',
           iteration: isReAudit ? 2 : 1,
         });
       } catch (dbErr) {
@@ -637,18 +637,49 @@ Format output as valid JSON matching this schema:
   }
 });
 
-// API Endpoint: Analytics Tracking (PostHog & Supabase style instrumentation)
-app.post('/api/analytics/track', (req, res) => {
+// API Endpoint: Analytics Tracking persisted in Supabase
+app.post('/api/analytics/track', async (req, res) => {
   const eventData = req.body;
   if (!eventData.eventName) {
     return res.status(400).json({ error: 'eventName is required' });
   }
 
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.status(503).json({
+      success: false,
+      error: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+    });
+  }
+
   const enrichedEvent = {
-    id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: randomUUID(),
     timestamp: new Date().toISOString(),
     ...eventData,
   };
+
+  const { error } = await supabase.from('analytics_events').insert({
+    id: enrichedEvent.id,
+    event_name: enrichedEvent.eventName,
+    event_time: enrichedEvent.timestamp,
+    source: 'pathwisse_qalam',
+    properties: {
+      anonymousId: enrichedEvent.anonymousId || null,
+      sessionId: enrichedEvent.sessionId || null,
+      auditId: enrichedEvent.auditId || null,
+      screenName: enrichedEvent.screenName || null,
+      careerRole: enrichedEvent.careerRole || null,
+      collegeId: enrichedEvent.collegeId || null,
+      campaignId: enrichedEvent.campaignId || null,
+      referralCode: enrichedEvent.referralCode || null,
+      metadata: enrichedEvent.metadata || {},
+    },
+  });
+
+  if (error) {
+    console.error('Supabase analytics insert error:', error.message);
+    return res.status(500).json({ success: false, error: 'Analytics event could not be saved.' });
+  }
 
   analyticsEventsStore.push(enrichedEvent);
 
@@ -667,7 +698,7 @@ app.get('/api/supabase/status', async (req, res) => {
     return res.json({
       configured: false,
       connected: false,
-      message: 'SUPABASE_URL and SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are not configured yet in environment variables.',
+      message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not configured yet in environment variables.',
       schemaSql: SUPABASE_SQL_SCHEMA,
     });
   }
@@ -681,8 +712,9 @@ app.get('/api/supabase/status', async (req, res) => {
     const { data: streamsCheck, error: streamErr } = await supabase.from('career_streams').select('id').limit(1);
     const { data: compCheck, error: compErr } = await supabase.from('role_competencies').select('id').limit(1);
     const { data: pricingCheck, error: pricingErr } = await supabase.from('pricing_plans').select('id').limit(1);
+    const { data: analyticsCheck, error: analyticsErr } = await supabase.from('analytics_events').select('id').limit(1);
 
-    const anyError = profErr || roleErr || streamErr || compErr || pricingErr;
+    const anyError = profErr || roleErr || streamErr || compErr || pricingErr || analyticsErr;
     if (anyError) {
       return res.json({
         configured: true,
@@ -695,7 +727,7 @@ app.get('/api/supabase/status', async (req, res) => {
     return res.json({
       configured: true,
       connected: true,
-      message: 'Successfully connected to Supabase BaaS! Tables (student_profiles, career_streams, career_roles, role_competencies, pricing_plans, career_audits, skill_signals) are verified and active.',
+        message: 'Successfully connected to Supabase! Tables (student_profiles, career_streams, career_roles, role_competencies, pricing_plans, career_audits, skill_signals, analytics_events) are verified and active.',
       schemaSql: SUPABASE_SQL_SCHEMA,
     });
   } catch (err: any) {
@@ -714,10 +746,9 @@ app.post('/api/supabase/profile/sync', async (req, res) => {
   const profileData = req.body;
 
   if (!supabase) {
-    return res.json({
+    return res.status(503).json({
       synced: false,
-      fallback: 'local_storage',
-      message: 'Supabase credentials not set, profile saved in local memory.',
+      error: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
     });
   }
 
@@ -757,10 +788,9 @@ app.post('/api/supabase/audit/save', async (req, res) => {
   const { phone, targetRole, auditResult, evidenceData } = req.body;
 
   if (!supabase) {
-    return res.json({
+    return res.status(503).json({
       synced: false,
-      fallback: 'local_storage',
-      message: 'Supabase credentials not set, audit saved in client state.',
+      error: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
     });
   }
 
@@ -770,7 +800,7 @@ app.post('/api/supabase/audit/save', async (req, res) => {
       .insert({
         audit_id: auditResult?.auditId || `audit_${Date.now()}`,
         phone: phone || 'anonymous',
-        target_role_title: targetRole || 'Software Engineer',
+         target_role: targetRole || 'Software Engineer',
         overall_score: auditResult?.overallScore || 0,
         dimension_scores: auditResult?.dimensionScores || {},
         diagnosis_summary: auditResult?.diagnosisSummary || '',
@@ -778,7 +808,6 @@ app.post('/api/supabase/audit/save', async (req, res) => {
         gaps: auditResult?.gaps || [],
         roadmap: auditResult?.roadmap || [],
         evidence_data: evidenceData || {},
-        status: auditResult?.status || 'COMPLETED',
         iteration: auditResult?.auditIteration || 1,
       })
       .select();
@@ -796,33 +825,63 @@ app.post('/api/supabase/audit/save', async (req, res) => {
 });
 
 // API Endpoint: Analytics Dashboard Metrics
-app.get('/api/analytics/stats', (req, res) => {
-  const totalEvents = analyticsEventsStore.length;
-  const sessions = new Set(analyticsEventsStore.map((e) => e.sessionId)).size;
+app.get('/api/analytics/stats', async (req, res) => {
+  const supabase = getSupabase();
+  let events = analyticsEventsStore;
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('analytics_events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      console.error('Supabase analytics query error:', error.message);
+      return res.status(500).json({ success: false, error: 'Analytics could not be loaded.' });
+    }
+
+    events = (data || []).map((event) => ({
+      id: event.id,
+      eventName: event.event_name,
+      ...(event.properties || {}),
+      metadata: event.properties?.metadata || {},
+      timestamp: event.event_time || event.created_at,
+    }));
+  }
+
+  const totalEvents = events.length;
+  const sessions = new Set(events.map((e) => e.sessionId)).size;
 
   const funnelCounts = {
-    landingViewed: analyticsEventsStore.filter((e) => e.eventName === 'career_audit_landing_viewed').length,
-    auditStarted: analyticsEventsStore.filter((e) => e.eventName === 'career_audit_started').length,
-    phoneSubmitted: analyticsEventsStore.filter((e) => e.eventName === 'phone_submitted').length,
-    otpVerified: analyticsEventsStore.filter((e) => e.eventName === 'otp_verified').length,
-    voiceSessionStarted: analyticsEventsStore.filter((e) => e.eventName === 'voice_session_started').length,
-    audit25: analyticsEventsStore.filter((e) => e.eventName === 'audit_progress_25').length,
-    audit50: analyticsEventsStore.filter((e) => e.eventName === 'audit_progress_50').length,
-    audit75: analyticsEventsStore.filter((e) => e.eventName === 'audit_progress_75').length,
-    auditCompleted: analyticsEventsStore.filter((e) => e.eventName === 'audit_completed').length,
-    roadmapViewed: analyticsEventsStore.filter((e) => e.eventName === 'roadmap_preview_viewed').length,
-    upgradeClicked: analyticsEventsStore.filter((e) => e.eventName === 'upgrade_clicked').length,
+    landingViewed: events.filter((e) => e.eventName === 'career_audit_landing_viewed').length,
+    auditStarted: events.filter((e) => e.eventName === 'career_audit_started').length,
+    phoneSubmitted: events.filter((e) => e.eventName === 'phone_submitted').length,
+    otpVerified: events.filter((e) => e.eventName === 'otp_verified').length,
+    voiceSessionStarted: events.filter((e) => e.eventName === 'voice_session_started').length,
+    audit25: events.filter((e) => e.eventName === 'audit_progress_25').length,
+    audit50: events.filter((e) => e.eventName === 'audit_progress_50').length,
+    audit75: events.filter((e) => e.eventName === 'audit_progress_75').length,
+    auditCompleted: events.filter((e) => e.eventName === 'audit_completed').length,
+    roadmapViewed: events.filter((e) => e.eventName === 'roadmap_preview_viewed').length,
+    upgradeClicked: events.filter((e) => e.eventName === 'upgrade_clicked').length,
   };
 
-  const voiceInteractions = analyticsEventsStore.filter((e) => e.inputMethod === 'voice').length;
-  const tapInteractions = analyticsEventsStore.filter((e) => e.inputMethod === 'tap' || e.inputMethod === 'type').length;
+  const voiceInteractions = events.filter((e) => e.inputMethod === 'voice' || e.metadata?.inputMethod === 'voice').length;
+  const tapInteractions = events.filter(
+    (e) =>
+      e.inputMethod === 'tap' ||
+      e.inputMethod === 'type' ||
+      e.metadata?.inputMethod === 'tap' ||
+      e.metadata?.inputMethod === 'type'
+  ).length;
 
   res.json({
     totalEvents,
     totalSessions: sessions || 1,
     funnel: funnelCounts,
     voiceVsTap: { voice: voiceInteractions, tap: tapInteractions },
-    recentEvents: analyticsEventsStore.slice(-25).reverse(),
+    recentEvents: events.slice(0, 25),
   });
 });
 
