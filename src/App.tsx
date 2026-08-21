@@ -1,9 +1,4 @@
 import React, { useState, useCallback } from 'react';
-<<<<<<< HEAD
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from './lib/firebase';
-=======
->>>>>>> fd3138c (Remove Firebase dependencies and migrate to Supabase)
 
 import { LandingView } from './components/audit/LandingView';
 import { PhoneOtpStep } from './components/audit/PhoneOtpStep';
