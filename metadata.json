@@ -1,0 +1,10 @@
+{
+  "name": "Remix Pathwisse Qalam - Interactive Voice Career Auditor",
+  "description": "An AI-powered voice career auditor experience featuring Qalam, Pathwisse\u0027s interactive AI Career Auditor mascot with real-time waveform reactivity, voice interview probing, skill gap analysis, and personalized career roadmaps.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
