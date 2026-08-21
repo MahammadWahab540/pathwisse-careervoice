@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { CaptionsDisplay } from '../voice/CaptionsDisplay';
@@ -326,6 +327,18 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
 
       {/* Live Captions Display */}
       <div className="w-full my-2">
+        <AnimatePresence>
+          {isFollowUpActive && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="mx-auto mb-2 w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-bold text-amber-800 shadow-sm"
+            >
+              Qalam found a deeper signal · clarifying
+            </motion.div>
+          )}
+        </AnimatePresence>
         <CaptionsDisplay
           lastQalamText={lastQalamMessage}
           lastUserText={lastUserMessage}
