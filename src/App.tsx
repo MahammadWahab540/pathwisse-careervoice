@@ -1,6 +1,4 @@
 import React, { useState, useCallback } from 'react';
-import { doc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './lib/firebase';
 
 import { LandingView } from './components/audit/LandingView';
 import { PhoneOtpStep } from './components/audit/PhoneOtpStep';
@@ -106,27 +104,6 @@ export function App() {
         body: JSON.stringify(payload),
       }).catch((e) => console.warn('Analytics tracking error:', e));
 
-      // Persist event to Firestore
-      try {
-        const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        setDoc(doc(db, 'analyticsEvents', eventId), {
-          id: eventId,
-          eventName: payload.eventName,
-          anonymousId: payload.anonymousId,
-          sessionId: payload.sessionId,
-          auditId: payload.auditId,
-          screenName: payload.screenName,
-          careerRole: payload.careerRole || '',
-          collegeId: payload.collegeId || '',
-          campaignId: payload.campaignId || '',
-          referralCode: payload.referralCode || '',
-          timestamp: new Date().toISOString(),
-        }).catch((err) => {
-          console.warn('Analytics event Firestore sync notice:', err?.message || err);
-        });
-      } catch (err) {
-        console.warn('Firestore analytics event error:', err);
-      }
     },
     [identity, currentStep, targetRole, selectedRoleForExploration, collegeId]
   );
@@ -192,25 +169,6 @@ export function App() {
         }),
       }).catch((e) => console.warn('Supabase audit sync notice:', e));
 
-      // Save Audit Session to Firestore
-      try {
-        const sessId = identity?.sessionId || `sess_${Date.now()}`;
-        const nowStr = new Date().toISOString();
-        setDoc(doc(db, 'auditSessions', sessId), {
-          id: sessId,
-          anonymousId: identity?.anonymousId || 'anon_guest',
-          sessionId: sessId,
-          targetRole: targetRole.title,
-          overallScore: fullResult.overallScore,
-          diagnosisSummary: fullResult.diagnosisSummary.substring(0, 1990),
-          createdAt: nowStr,
-          updatedAt: nowStr,
-        }).catch((err) => {
-          console.warn('Audit session Firestore sync notice:', err?.message || err);
-        });
-      } catch (err) {
-        console.warn('Audit session Firestore save error:', err);
-      }
     } catch (err: any) {
       console.error('Failed to generate results:', err);
       setIsEvaluating(false);
@@ -277,28 +235,6 @@ export function App() {
                 setIdentity(ident);
                 setCurrentStep('ASK_NAME');
 
-                try {
-                  const sanitizedPhone = ident.phone ? ident.phone.replace(/\D/g, '') : '';
-                  const uId = sanitizedPhone ? `usr_${sanitizedPhone}` : `anon_${ident.anonymousId}`;
-                  const nowStr = new Date().toISOString();
-                  setDoc(doc(db, 'users', uId), {
-                    id: uId,
-                    phone: ident.phone || '',
-                    countryCode: ident.countryCode || '+91',
-                    isOtpVerified: ident.isOtpVerified || false,
-                    anonymousId: ident.anonymousId,
-                    sessionId: ident.sessionId,
-                    referralCode: ident.referralCode || '',
-                    campaignId: ident.campaignId || '',
-                    collegeId: ident.collegeId || '',
-                    createdAt: nowStr,
-                    updatedAt: nowStr,
-                  }).catch((err) => {
-                    console.warn('User profile Firestore sync notice:', err?.message || err);
-                  });
-                } catch (err) {
-                  console.warn('User profile save error:', err);
-                }
               }}
               trackEvent={trackEvent}
             />

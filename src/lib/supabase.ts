@@ -11,7 +11,9 @@ let supabaseClient: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  // Supabase is accessed only from the server. The service-role key must never
+  // be exposed to the browser or replaced with the public anon key here.
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
     return null;
@@ -171,6 +173,22 @@ CREATE TABLE IF NOT EXISTS public.career_audits (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 8. Create Analytics Events Table
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+  id TEXT PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  anonymous_id TEXT,
+  session_id TEXT,
+  audit_id TEXT,
+  screen_name TEXT,
+  career_role TEXT,
+  college_id TEXT,
+  campaign_id TEXT,
+  referral_code TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Row Level Security (RLS)
 ALTER TABLE public.career_streams ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.career_roles ENABLE ROW LEVEL SECURITY;
@@ -179,14 +197,10 @@ ALTER TABLE public.pricing_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.skill_signals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.career_audits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read-write for streams" ON public.career_streams FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for roles" ON public.career_roles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for competencies" ON public.role_competencies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for pricing" ON public.pricing_plans FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for profiles" ON public.student_profiles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for skill_signals" ON public.skill_signals FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for audits" ON public.career_audits FOR ALL USING (true) WITH CHECK (true);
+-- No public policies are created. All writes go through the server using the
+-- service-role key, which bypasses RLS without exposing that key to clients.
 `;
 
 /**
