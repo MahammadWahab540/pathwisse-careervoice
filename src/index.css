@@ -43,32 +43,3 @@
   background: rgba(148, 163, 184, 0.8);
 }
 
-@keyframes careervoice-sheen {
-  0% { transform: translateX(-140%); }
-  100% { transform: translateX(140%); }
-}
-
-@keyframes careervoice-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.55; }
-  50% { transform: scale(1.08); opacity: 1; }
-}
-
-.careervoice-sheen {
-  animation: careervoice-sheen 2.4s ease-in-out infinite;
-}
-
-.careervoice-breathe {
-  animation: careervoice-breathe 2.2s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-

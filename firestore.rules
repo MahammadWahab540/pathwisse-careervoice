@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_+\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.anonymousId is string && data.anonymousId.size() <= 100
+        && data.sessionId is string && data.sessionId.size() <= 100
+        && data.createdAt is string
+        && data.get('phone', '') is string && data.get('phone', '').size() <= 30
+        && data.get('countryCode', '') is string && data.get('countryCode', '').size() <= 10
+        && data.get('isOtpVerified', true) is bool
+        && data.get('collegeId', '') is string && data.get('collegeId', '').size() <= 100
+        && data.get('degree', '') is string && data.get('degree', '').size() <= 100
+        && data.get('year', '') is string && data.get('year', '').size() <= 50
+        && data.get('collegeName', '') is string && data.get('collegeName', '').size() <= 200
+        && data.get('branch', '') is string && data.get('branch', '').size() <= 100
+        && data.get('referralCode', '') is string && data.get('referralCode', '').size() <= 50
+        && data.get('campaignId', '') is string && data.get('campaignId', '').size() <= 50
+        && data.get('updatedAt', '') is string && data.get('updatedAt', '').size() <= 100;
+    }
+
+    function isValidAuditSession(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.anonymousId is string && data.anonymousId.size() <= 100
+        && data.sessionId is string && data.sessionId.size() <= 100
+        && data.targetRole is string && data.targetRole.size() <= 100
+        && data.overallScore is number && data.overallScore >= 0 && data.overallScore <= 100
+        && data.createdAt is string
+        && data.get('diagnosisSummary', '') is string && data.get('diagnosisSummary', '').size() <= 2000
+        && data.get('updatedAt', '') is string && data.get('updatedAt', '').size() <= 100;
+    }
+
+    function isValidAnalyticsEvent(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.eventName is string && data.eventName.size() <= 100
+        && data.anonymousId is string && data.anonymousId.size() <= 100
+        && data.sessionId is string && data.sessionId.size() <= 100
+        && data.timestamp is string
+        && data.get('auditId', '') is string && data.get('auditId', '').size() <= 100
+        && data.get('screenName', '') is string && data.get('screenName', '').size() <= 100
+        && data.get('careerRole', '') is string && data.get('careerRole', '').size() <= 100
+        && data.get('collegeId', '') is string && data.get('collegeId', '').size() <= 100
+        && data.get('campaignId', '') is string && data.get('campaignId', '').size() <= 50
+        && data.get('referralCode', '') is string && data.get('referralCode', '').size() <= 50
+        && data.get('inputMethod', '') is string && data.get('inputMethod', '').size() <= 20;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isValidId(userId);
+      allow create: if isValidId(userId) && isValidUser(incoming());
+      allow update: if isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == existing().createdAt;
+    }
+
+    // Audit Sessions Collection
+    match /auditSessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if true;
+      allow create: if isValidId(sessionId) && isValidAuditSession(incoming());
+      allow update: if isValidId(sessionId) && isValidAuditSession(incoming()) && incoming().createdAt == existing().createdAt;
+    }
+
+    // Analytics Events Collection
+    match /analyticsEvents/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if true;
+      allow create: if isValidId(eventId) && isValidAnalyticsEvent(incoming());
+    }
+
+    // Connection Test Collection
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

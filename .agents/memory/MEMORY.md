@@ -1,1 +1,0 @@
-- [Supabase schema compatibility](supabase-schema-compatibility.md) — inspect the connected project’s live schema before applying imported migrations; this project uses UUID-based shared tables.

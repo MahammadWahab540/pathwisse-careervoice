@@ -1,4 +1,4 @@
-export type QalamState =
+export type QalamState = 
   | 'IDLE'
   | 'WELCOME'
   | 'LISTENING'
@@ -9,15 +9,10 @@ export type QalamState =
   | 'ENCOURAGING'
   | 'CELEBRATING';
 
-export type EvidenceStrength = 'Strong' | 'Moderate' | 'Weak' | 'None';
-export type ReadinessStatus = 'Ready' | 'Nearly Ready' | 'Developing' | 'Early Stage';
-export type GapPriority = 'Critical' | 'High' | 'Medium' | 'Low';
-
 export interface UserIdentity {
   phone: string;
   countryCode: string;
   isOtpVerified: boolean;
-  studentId: string;
   anonymousId: string;
   sessionId: string;
   referralCode?: string;
@@ -39,36 +34,27 @@ export interface CareerRoleTarget {
   description: string;
   demandLevel: 'High' | 'Extremely High' | 'Moderate';
   keySkills: string[];
-  matchScore?: number;
-  fitBand?: string;
-  fitReasons?: string[];
 }
 
 export interface CompetencySkillBenchmark {
-  skillId: string;
-  skillSlug?: string;
   skillName: string;
-  category: string;
-  requiredLevel?: string;
-  expectedScore: number;
-  importanceWeight: number;
-  dependencyWeight: number;
-  employabilityWeight: number;
+  category: 'Core Theory' | 'Applied Engineering' | 'Tools & Infrastructure' | 'Problem Solving';
+  expectedLevel: 'Beginner' | 'Intermediate' | 'Advanced';
   description: string;
+  weight: number;
 }
 
 export interface RoleCompetencyModel {
   roleId: string;
   roleTitle: string;
-  description?: string;
-  minimumReadinessBenchmark: number;
+  description: string;
+  minimumReadinessBenchmark: number; // e.g. 70
   coreCompetencies: CompetencySkillBenchmark[];
   evaluationCriteria: {
     clarityWeight: number;
     technicalWeight: number;
     projectWeight: number;
     communicationWeight: number;
-    placementWeight: number;
     executionWeight: number;
   };
 }
@@ -78,9 +64,9 @@ export interface DiagnosticConclusion {
   skillName: string;
   studentAnswerSnippet: string;
   evidenceVerified: string;
-  evidenceStrength: EvidenceStrength;
-  score: number;
-  confidenceScore: number;
+  evidenceStrength: 'Strong' | 'Moderate' | 'Weak' | 'None';
+  score: number; // 0 - 100
+  confidenceScore: number; // 0 - 100
   confidenceLevel: 'High' | 'Medium' | 'Low';
   gapSeverity: 'RED' | 'ORANGE' | 'GREEN';
   gapDescription: string;
@@ -89,78 +75,32 @@ export interface DiagnosticConclusion {
 
 export interface SkillEvidence {
   skillName: string;
-  claimedLevel?: string;
-  extractedLevel: string;
-  confidenceScore: number;
+  claimedLevel: 'Beginner' | 'Intermediate' | 'Advanced';
+  evidenceLevel: 'None' | 'Beginner' | 'Intermediate' | 'Advanced';
+  confidenceScore: number; // 0 - 100
   confidenceLevel?: 'High' | 'Medium' | 'Low';
-  evidenceStrength: EvidenceStrength;
-  rawAnswerSnippet: string;
-  source: 'voice_probe' | 'typed_probe' | 'resume' | 'project' | 'github' | 'document';
-  signalId?: string;
-  evidenceId?: string;
+  notes?: string;
+  mappedEvidence?: string;
 }
 
 export interface DimensionScores {
-  careerClarity: number;
-  technicalReadiness: number;
-  projectReadiness: number;
-  communication: number;
-  placementReadiness: number;
-  executionReadiness: number;
+  careerClarity: number;      // 0 - 100
+  technicalReadiness: number; // 0 - 100
+  projectReadiness: number;   // 0 - 100
+  communication: number;      // 0 - 100
+  placementReadiness: number; // 0 - 100
+  executionReadiness: number; // 0 - 100
 }
 
 export interface CareerGap {
   id: string;
-  gapId?: string;
-  skillId?: string;
   title: string;
-  skillName?: string;
-  severity: 'RED' | 'ORANGE' | 'GREEN';
-  priority?: GapPriority;
+  severity: 'RED' | 'ORANGE' | 'GREEN'; // RED = critical, ORANGE = moderate, GREEN = strength
   description: string;
-  expectedScore?: number;
-  demonstratedScore?: number;
-  gap?: number;
-  priorityWeight?: number;
-  weightedGap?: number;
   pathwisseSkillId?: string;
-  recommendedPathwisseSkillId?: string;
-  recommendedStageIds?: string[];
-  mappingStatus?: 'MAPPED' | 'UNMAPPED';
   recommendedAction: string;
   associatedSkill?: string;
   evidenceBasis?: string;
-  evidenceIds?: string[];
-  signalIds?: string[];
-}
-
-export interface AuditStrength {
-  skillId: string;
-  skillName: string;
-  demonstratedScore: number;
-  evidence: string;
-  confidenceScore: number;
-  whyItMatters: string;
-}
-
-export interface EvidenceLedgerItem {
-  skillId: string;
-  skillName: string;
-  observedEvidence: string[];
-  missingEvidence: string[];
-  weakEvidence: string[];
-  contradictoryEvidence: string[];
-}
-
-export interface AuditRecommendation {
-  recommendationId: string;
-  gapId: string;
-  rank: number;
-  recommendedAction: string;
-  reason: string;
-  mappingStatus: 'MAPPED' | 'UNMAPPED';
-  pathwisseSkillId?: string;
-  recommendedStageIds: string[];
 }
 
 export interface RoadmapTopic {
@@ -180,52 +120,20 @@ export interface RoadmapWeek {
   completed?: boolean;
 }
 
-export interface CareerAuditRoadmapHandoff {
-  contract: 'career-audit-roadmap-contract:v1';
-  auditId: string;
-  studentId: string;
-  targetRoleId: string;
-  readinessScore: number;
-  priorityGaps: Array<{
-    gapId: string;
-    skillId: string;
-    skillName: string;
-    expectedScore: number;
-    demonstratedScore: number;
-    gapScore: number;
-    priority: GapPriority;
-    mappingStatus: 'MAPPED' | 'UNMAPPED';
-    recommendedPathwisseSkillId?: string;
-    recommendedStageIds: string[];
-    evidenceIds: string[];
-  }>;
-}
-
 export interface CareerAuditResult {
-  auditId: string;
-  targetRoleId: string;
-  targetRole: string;
   overallScore: number;
-  readinessStatus: ReadinessStatus;
-  hiringBenchmark: number;
-  distanceFromBenchmark: number;
   dimensionScores: DimensionScores;
   diagnosisSummary: string;
-  whyRoleFits: string[];
-  strengths: AuditStrength[];
-  gaps: CareerGap[];
-  evidenceLedger: EvidenceLedgerItem[];
-  priorityRecommendations: AuditRecommendation[];
   diagnosticConclusions: DiagnosticConclusion[];
-  roadmapHandoff?: CareerAuditRoadmapHandoff;
-  roadmap?: RoadmapWeek[];
-  recommendedPathwissePlan?: {
+  gaps: CareerGap[];
+  roadmap: RoadmapWeek[];
+  recommendedPathwissePlan: {
     planName: string;
     highlight: string;
     features: string[];
   };
   auditTimestamp?: string;
-  auditIteration?: number;
+  auditIteration?: number; // 1 for first audit, 2+ for re-audits
 }
 
 export interface AuditMessage {
@@ -255,10 +163,10 @@ export interface EvidenceUploads {
 export interface AnalyticsEvent {
   id: string;
   eventName: string;
-  studentId?: string;
+  userId?: string;
   anonymousId: string;
   sessionId: string;
-  auditId?: string;
+  auditId: string;
   screenName: string;
   questionId?: string;
   careerRole?: string;
@@ -268,7 +176,7 @@ export interface AnalyticsEvent {
   inputMethod?: 'voice' | 'tap' | 'type';
   timestamp: string;
   timeOnScreenMs?: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface VoiceMetrics {
