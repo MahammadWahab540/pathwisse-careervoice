@@ -1,26 +1,30 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import {
-  SEED_CAREER_STREAMS,
-  SEED_CAREER_ROLES,
-  SEED_ROLE_COMPETENCIES,
-  SEED_PRICING_PLANS,
-} from './seedData';
+import { serverConfig } from '../server/config';
 
-// Lazy initialization of Supabase client on backend
 let supabaseClient: SupabaseClient | null = null;
 
+/**
+ * Server-only privileged Supabase client.
+ *
+ * The service-role key is intentionally read only from process environment and
+ * this module must never be imported by browser bundles.
+ */
 export function getSupabase(): SupabaseClient | null {
+<<<<<<< HEAD
   const supabaseUrl = process.env.SUPABASE_URL;
   // Supabase is accessed only from the server. The service-role key must never
   // be exposed to the browser or replaced with the public anon key here.
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
+=======
+  if (!serverConfig.supabaseUrl || !serverConfig.supabaseServiceRoleKey) {
+>>>>>>> c9a0a7f28e698dc85cf6f8f39b82247c90001fab
     return null;
   }
 
   if (!supabaseClient) {
-    supabaseClient = createClient(supabaseUrl, supabaseKey, {
+    supabaseClient = createClient(serverConfig.supabaseUrl, serverConfig.supabaseServiceRoleKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -29,6 +33,14 @@ export function getSupabase(): SupabaseClient | null {
   }
 
   return supabaseClient;
+}
+
+export function requireSupabase(): SupabaseClient {
+  const client = getSupabase();
+  if (!client) {
+    throw new Error('SUPABASE_NOT_CONFIGURED');
+  }
+  return client;
 }
 
 export interface SupabaseUserProfile {
@@ -51,17 +63,18 @@ export interface SupabaseAuditRecord {
   target_role_id?: string;
   target_role_title: string;
   overall_score: number;
-  dimension_scores: any;
+  dimension_scores: Record<string, number>;
   diagnosis_summary: string;
-  diagnostic_conclusions: any;
-  gaps: any;
-  roadmap: any;
-  evidence_data?: any;
+  diagnostic_conclusions: unknown[];
+  gaps: unknown[];
+  roadmap: unknown;
+  evidence_data?: unknown;
   status?: string;
   error_message?: string;
   iteration?: number;
   created_at?: string;
 }
+<<<<<<< HEAD
 
 /**
  * SQL Schema definition for easy copy/paste into Supabase SQL Editor
@@ -160,3 +173,5 @@ export async function autoSeedSupabaseData(supabase: SupabaseClient) {
     console.warn('Notice: Supabase auto-seed encountered schema pending:', err?.message || err);
   }
 }
+=======
+>>>>>>> c9a0a7f28e698dc85cf6f8f39b82247c90001fab

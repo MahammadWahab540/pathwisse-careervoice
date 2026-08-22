@@ -2,7 +2,6 @@ modules = ["nodejs-22", "web", "python-base-3.13"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["glib", "gtk3", "nss", "nspr", "atk", "at-spi2-atk", "cups", "libdrm", "mesa", "pango", "cairo", "alsa-lib", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "libgbm", "libglvnd", "libxkbcommon", "xorg.libxkbfile"]
 
 [agent]
 expertMode = true
