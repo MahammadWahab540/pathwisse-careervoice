@@ -58,6 +58,12 @@ type AuditStep =
   | 'GAP_REPORT'
   | 'ROADMAP';
 
+type EvaluationResponse = Partial<CareerAuditResult> & {
+  success?: boolean;
+  error?: string;
+  toolCalls?: QalamToolCall[];
+};
+
 export function App() {
   const [currentStep, setCurrentStep] = useState<AuditStep>('WELCOME');
 
@@ -161,7 +167,7 @@ export function App() {
         }),
       });
 
-      const data: Partial<CareerAuditResult> & { toolCalls?: QalamToolCall[] } = await res.json();
+      const data: EvaluationResponse = await res.json();
 
       if (!res.ok || data.success === false) {
         throw new Error(data.error || 'Evaluation engine failed to score audit answers.');
