@@ -19,7 +19,13 @@ import { GapReportView } from './components/audit/GapReportView';
 import { RoadmapView } from './components/audit/RoadmapView';
 import { ShareCardModal } from './components/audit/ShareCardModal';
 import { UpgradeModal } from './components/audit/UpgradeModal';
+import { AdaptiveToolSurface } from './components/adaptive-ui/AdaptiveToolSurface';
 
+import {
+  type AdaptiveEvidenceSubmission,
+  type QalamToolCall,
+  mergeQalamToolCalls,
+} from './ai/qalamTools';
 import {
   UserIdentity,
   CareerRoleTarget,
@@ -136,6 +142,7 @@ function MainApp() {
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [adaptiveToolCalls, setAdaptiveToolCalls] = useState<QalamToolCall[]>([]);
 
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
@@ -159,6 +166,30 @@ function MainApp() {
       trackAnalyticsEvent(payload);
     },
     [identity, auditId, currentStep, targetRole, selectedRoleForExploration, collegeId]
+  );
+
+  const handleToolCalls = useCallback((incomingCalls: QalamToolCall[]) => {
+    setAdaptiveToolCalls((existing) => mergeQalamToolCalls(existing, incomingCalls));
+  }, []);
+
+  const handleAdaptiveEvidence = useCallback(
+    async (submission: AdaptiveEvidenceSubmission) => {
+      if (!auditId) return;
+      try {
+        const rawText = submission.url || submission.note || submission.fileName || '';
+        const source = submission.url?.includes('github') ? 'github' : 'project';
+        await uploadTextEvidence({
+          auditId,
+          evidenceType: 'adaptive_evidence',
+          rawText,
+          source,
+          metadata: { skillName: submission.skillName },
+        });
+      } catch (err) {
+        console.warn('Adaptive evidence upload notice:', err);
+      }
+    },
+    [auditId]
   );
 
   // Resume / Restore Session on Page Refresh
@@ -283,7 +314,6 @@ function MainApp() {
       localStorage.setItem('careervoice_student_id', identity.studentId);
       if (identity.phone) localStorage.setItem('careervoice_phone', identity.phone);
 
-      // Update URL search param for easy reload / sharing
       const url = new URL(window.location.href);
       url.searchParams.set('auditId', session.auditId);
       window.history.replaceState({}, '', url.toString());
@@ -406,6 +436,7 @@ function MainApp() {
     setAuditResult(null);
     setEvaluationError(null);
     setFlowError(null);
+    setAdaptiveToolCalls([]);
   };
 
   if (isRestoring) {
@@ -601,6 +632,7 @@ function MainApp() {
               onInterviewFinished={(_data) => {
                 setCurrentStep('EVIDENCE_UPLOAD');
               }}
+              onToolCalls={handleToolCalls}
               trackEvent={trackEvent}
             />
           )}
@@ -670,6 +702,14 @@ function MainApp() {
               trackEvent={trackEvent}
             />
           )}
+
+          <AdaptiveToolSurface
+            calls={adaptiveToolCalls}
+            onSubmitEvidence={handleAdaptiveEvidence}
+            onDismiss={(callId) => {
+              setAdaptiveToolCalls((calls) => calls.filter((call) => call.id !== callId));
+            }}
+          />
         </div>
       </main>
 

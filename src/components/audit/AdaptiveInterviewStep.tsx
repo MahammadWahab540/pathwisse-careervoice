@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { VoiceWaveform } from '../voice/VoiceWaveform';
@@ -15,6 +15,7 @@ import type {
   StudentContext,
 } from '../../types';
 import type { EvidenceCoverageItemDto, EvidenceStrength, EvidenceStatus } from '../../types/audit';
+import type { QalamToolCall } from '../../ai/qalamTools';
 import {
   Mic,
   MicOff,
@@ -41,6 +42,7 @@ interface AdaptiveInterviewStepProps {
     skillsExtracted: SkillEvidence[];
     communicationSample: string;
   }) => void;
+  onToolCalls?: (calls: QalamToolCall[]) => void;
   trackEvent: (eventName: string, metadata?: Record<string, unknown>) => void;
 }
 
@@ -60,6 +62,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   firstName,
   initialMessages = [],
   onInterviewFinished,
+  onToolCalls,
   trackEvent,
 }) => {
   const [messages, setMessages] = useState<AuditMessage[]>(initialMessages);
@@ -224,6 +227,14 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
         currentStage: PROBE_STAGES[currentTurn].id,
         nextQuestion,
       });
+
+      if (Array.isArray((data as any).toolCalls) && (data as any).toolCalls.length > 0) {
+        onToolCalls?.((data as any).toolCalls as QalamToolCall[]);
+        trackEvent('qalam_adaptive_ui_called', {
+          tools: (data as any).toolCalls.map((call: QalamToolCall) => call.name),
+          turn: currentTurn,
+        });
+      }
 
       const persistedSkills: SkillEvidence[] = await Promise.all(
         (data.extractedSkills || []).map(async (skill) => {

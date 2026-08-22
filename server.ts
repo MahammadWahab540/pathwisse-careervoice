@@ -39,6 +39,22 @@ import {
   getPersistedHandoff,
   getPersistedReport,
 } from './src/server/finalizeAudit';
+import {
+  SEED_CAREER_STREAMS,
+  SEED_CAREER_ROLES,
+  SEED_ROLE_COMPETENCIES,
+  SEED_PRICING_PLANS,
+} from './src/lib/seedData';
+import {
+  QALAM_ADAPTIVE_UI_INSTRUCTION,
+  buildAuditToolCalls,
+} from './src/ai/qalamTools';
+import {
+  QALAM_GEMINI_TOOLS,
+  loadRoleBenchmarkContext,
+  normalizeGeminiFunctionCalls,
+  planAdaptiveToolCalls,
+} from './src/ai/qalamServerTools';
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -136,7 +152,19 @@ function mapRole(role: Record<string, unknown>, skills: Array<Record<string, unk
   };
 }
 
-// Gemini Live is deliberately experimental and does not participate in audit scoring.
+async function getPublishedRoles(streamId?: string) {
+  const supabase = requireSupabase();
+  const streamDbId = await resolveStreamDatabaseId(streamId);
+  let query = supabase.from('career_roles').select('*').eq('status', 'published');
+  if (streamDbId) query = query.eq('stream_id', streamDbId);
+  const roleResult = await query;
+  if (roleResult.error) throw new PersistenceError('career_roles_read', roleResult.error.message);
+  const roles = (roleResult.data || []) as Array<Record<string, unknown>>;
+  const skills = (await loadRoleSkills(supabase, roles.map((role) => String(role.id)))) as Array<Record<string, unknown>>;
+  return roles.map((role) => mapRole(role, skills));
+}
+
+// Gemini Live WebSocket bridge with tool calling
 if (serverConfig.enableGeminiLive) {
   const wss = new WebSocketServer({ server: httpServer, path: '/live' });
   wss.on('connection', async (clientWs: WebSocket) => {
@@ -153,8 +181,14 @@ if (serverConfig.enableGeminiLive) {
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
-          systemInstruction:
-            'You are Qalam, Pathwisse CareerVoice. This is an experimental voice transport only. Never calculate or persist career readiness scores.',
+          tools: QALAM_GEMINI_TOOLS,
+          systemInstruction: `You are Qalam, Pathwisse's interactive AI Career Auditor mascot.
+You conduct real-time interactive voice career audits. Speak in a warm, intelligent, concise tone (2-3 sentences max).
+Probe the student for actual evidence of applied skills, software projects, libraries used, and engineering challenges. Keep responses natural and conversational.
+
+${QALAM_ADAPTIVE_UI_INSTRUCTION}
+
+For Live sessions, never call show_competency_benchmark unless a verified benchmark value has been explicitly supplied in the conversation context.`,
           outputAudioTranscription: {},
           inputAudioTranscription: {},
         },
@@ -168,6 +202,11 @@ if (serverConfig.enableGeminiLive) {
             if (outText && clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify({ type: 'outputText', text: outText }));
             const inText = message.serverContent?.inputTranscription?.text;
             if (inText && clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify({ type: 'inputText', text: inText }));
+
+            const toolCalls = normalizeGeminiFunctionCalls(message.toolCall?.functionCalls, 'live');
+            if (toolCalls.length > 0 && clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'toolCall', calls: toolCalls }));
+            }
           },
           onclose: () => {
             if (clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify({ type: 'closed' }));
@@ -181,9 +220,20 @@ if (serverConfig.enableGeminiLive) {
 
       clientWs.on('message', (rawMessage) => {
         try {
-          const payload = JSON.parse(rawMessage.toString()) as { audio?: string; text?: string };
-          if (payload.audio) session.sendRealtimeInput({ audio: { data: payload.audio, mimeType: 'audio/pcm;rate=16000' } });
-          else if (payload.text) session.sendRealtimeInput({ text: payload.text });
+          const msg = JSON.parse(rawMessage.toString()) as { audio?: string; text?: string; toolResult?: { id: string; name: string; result?: unknown } };
+          if (msg.audio) {
+            session.sendRealtimeInput({ audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' } });
+          } else if (msg.text) {
+            session.sendRealtimeInput({ text: msg.text });
+          } else if (msg.toolResult?.id && msg.toolResult?.name) {
+            session.sendToolResponse({
+              functionResponses: [{
+                id: msg.toolResult.id,
+                name: msg.toolResult.name,
+                response: (msg.toolResult.result as any) || { rendered: true },
+              }],
+            });
+          }
         } catch (error) {
           console.error('gemini_live_client_message_error', { message: error instanceof Error ? error.message : String(error) });
         }
@@ -243,67 +293,57 @@ app.post('/api/profile/sync', async (req, res) => {
     let collegeId: string | null = null;
     const collegeName = optionalString(req.body?.collegeName);
     if (collegeName) {
-      const college = await supabase.from('colleges').select('id').ilike('name', collegeName).limit(1).maybeSingle();
-      if (college.error) throw new PersistenceError('profile_college_lookup', college.error.message);
-      collegeId = college.data?.id || null;
+      const collegeResult = await supabase.from('colleges').upsert({ name: collegeName }, { onConflict: 'name' }).select('id').single();
+      if (collegeResult.error) throw new PersistenceError('college_upsert', collegeResult.error.message);
+      collegeId = collegeResult.data.id;
     }
-    const profileResult = await supabase
-      .from('profiles')
-      .upsert(
-        {
-          user_id: studentId,
-          full_name: optionalString(req.body?.firstName) || null,
-          college_id: collegeId,
-          department: optionalString(req.body?.branch) || null,
-          academic_year: normalizedAcademicYear(req.body?.gradYear),
-          career_intent: optionalString(req.body?.careerIntent) || null,
-          target_role_id: optionalString(req.body?.targetRoleId) || null,
-          onboarding_completed_at: req.body?.careerIntent ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      )
-      .select('id,user_id')
-      .single();
-    if (profileResult.error || !profileResult.data) throw new PersistenceError('profile_upsert', profileResult.error?.message || 'Profile could not be saved.');
-    return res.json({ success: true, profileId: profileResult.data.id, studentId: profileResult.data.user_id });
+
+    const payload = {
+      user_id: studentId,
+      full_name: optionalString(req.body?.firstName),
+      college_id: collegeId,
+      branch: optionalString(req.body?.branch),
+      academic_year: normalizedAcademicYear(req.body?.gradYear),
+      career_intent_raw: optionalString(req.body?.careerIntent),
+      target_role_id: optionalString(req.body?.targetRoleId),
+      metadata: {
+        source: 'careervoice_consumer_web',
+        lastUpdatedFrom: 'profile_sync',
+      },
+    };
+
+    const result = await supabase.from('student_profiles').upsert(payload, { onConflict: 'user_id' }).select('id, user_id').single();
+    if (result.error) throw new PersistenceError('student_profile_upsert', result.error.message);
+
+    return res.json({
+      success: true,
+      profileId: result.data.id,
+      studentId: result.data.user_id,
+    });
   } catch (error) {
     return handleRouteError(res, error, 'profile_sync');
   }
 });
 
-// Backward-safe alias while frontend migrates to the canonical endpoint.
-app.post('/api/supabase/profile/sync', async (req, res, next) => {
-  req.url = '/api/profile/sync';
-  next();
-});
-
 app.get('/api/streams', async (_req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
-  const result = await supabase
-    .from('career_streams')
-    .select('id,code,title,description,icon_name,sort_order')
-    .eq('status', 'published')
-    .order('sort_order', { ascending: true });
-  if (result.error) return apiError(res, 500, 'CATALOG_READ_FAILED', 'Career streams could not be loaded.');
-  return res.json((result.data || []).map((stream) => ({ id: stream.code, databaseId: stream.id, title: stream.title, description: stream.description, iconName: stream.icon_name })));
+  try {
+    const result = await supabase.from('career_streams').select('id, code, name, description, icon_name, sort_order').eq('status', 'published').order('sort_order', { ascending: true });
+    if (result.error) throw new PersistenceError('career_streams_read', result.error.message);
+    return res.json(
+      (result.data || []).map((stream) => ({
+        id: stream.code || stream.id,
+        databaseId: stream.id,
+        title: stream.name,
+        description: stream.description,
+        iconName: stream.icon_name,
+      }))
+    );
+  } catch (error) {
+    return handleRouteError(res, error, 'streams_catalog');
+  }
 });
-
-async function getPublishedRoles(streamIdOrCode?: string) {
-  const supabase = requireSupabase();
-  const databaseStreamId = await resolveStreamDatabaseId(streamIdOrCode);
-  let query = supabase
-    .from('career_roles')
-    .select('id,stream_id,slug,title,category,description,demand_level,status,fit_reason,match_type')
-    .eq('status', 'published');
-  if (databaseStreamId) query = query.eq('stream_id', databaseStreamId);
-  const roleResult = await query;
-  if (roleResult.error) throw new PersistenceError('career_roles_read', roleResult.error.message);
-  const roles = (roleResult.data || []) as Array<Record<string, unknown>>;
-  const skills = (await loadRoleSkills(supabase, roles.map((role) => String(role.id)))) as Array<Record<string, unknown>>;
-  return roles.map((role) => mapRole(role, skills));
-}
 
 app.get('/api/roles', async (req, res) => {
   const supabase = await requireDatabase(res);
@@ -468,98 +508,57 @@ app.post('/api/audit/session', async (req, res) => {
       idempotencyKey: optionalString(req.body?.idempotencyKey),
       context: isRecord(req.body?.context) ? req.body.context : {},
     });
-    return res.status(201).json({ success: true, auditId: session.id, studentId: session.user_id, targetRoleId: session.target_role_id, status: session.status });
+    return res.status(201).json({
+      success: true,
+      auditId: session.id,
+      studentId: session.user_id,
+      targetRoleId: session.target_role_id,
+      status: session.status,
+    });
   } catch (error) {
     return handleRouteError(res, error, 'audit_session_create');
   }
 });
 
-interface ChatAiResponse {
-  qalamText: string;
-  qalamState: string;
-  evidenceStrength: EvidenceStrength;
-  needsFollowUp: boolean;
-  followUpQuestion: string;
-  extractedSkills: Array<{ skillName: string; extractedLevel: string; confidenceScore: number; evidenceStrength: EvidenceStrength }>;
-}
-
-function validateChatAiResponse(value: unknown, allowedSkills: Set<string>): ChatAiResponse {
-  if (!isRecord(value)) throw new Error('Qalam response must be an object');
-  const qalamText = requiredString(value.qalamText, 'qalamText');
-  const qalamState = requiredString(value.qalamState, 'qalamState');
-  const evidenceStrength = requiredString(value.evidenceStrength, 'evidenceStrength') as EvidenceStrength;
-  if (!['Strong', 'Moderate', 'Weak', 'None'].includes(evidenceStrength)) throw new Error('evidenceStrength is invalid');
-  if (typeof value.needsFollowUp !== 'boolean') throw new Error('needsFollowUp is required');
-  const followUpQuestion = typeof value.followUpQuestion === 'string' ? value.followUpQuestion.trim() : '';
-  if (!Array.isArray(value.extractedSkills)) throw new Error('extractedSkills must be an array');
-  const extractedSkills = value.extractedSkills.map((item, index) => {
-    if (!isRecord(item)) throw new Error(`extractedSkills[${index}] is invalid`);
-    const skillName = requiredString(item.skillName, `extractedSkills[${index}].skillName`);
-    if (!allowedSkills.has(skillName)) throw new Error(`Unknown extracted skill ${skillName}`);
-    const extractedLevel = requiredString(item.extractedLevel, `extractedSkills[${index}].extractedLevel`);
-    const confidenceScore = Number(item.confidenceScore);
-    if (!Number.isFinite(confidenceScore) || confidenceScore < 0 || confidenceScore > 100) throw new Error('confidenceScore is invalid');
-    const skillStrength = requiredString(item.evidenceStrength, `extractedSkills[${index}].evidenceStrength`) as EvidenceStrength;
-    if (!['Strong', 'Moderate', 'Weak', 'None'].includes(skillStrength)) throw new Error('skill evidenceStrength is invalid');
-    return { skillName, extractedLevel, confidenceScore, evidenceStrength: skillStrength };
-  });
-  return { qalamText, qalamState, evidenceStrength, needsFollowUp: value.needsFollowUp, followUpQuestion, extractedSkills };
-}
-
 app.post('/api/qalam/chat', async (req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
   try {
-    if (!serverConfig.geminiConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const auditId = requiredString(req.body?.auditId, 'auditId');
     const userText = requiredString(req.body?.userText, 'userText');
     const inputMethod = requiredString(req.body?.inputMethod, 'inputMethod');
-    if (!['voice', 'type', 'tap'].includes(inputMethod)) return apiError(res, 400, 'INVALID_REQUEST', 'inputMethod is invalid.');
     const clientMessageId = requiredString(req.body?.clientMessageId, 'clientMessageId');
-    const targetRoleId = requiredString(req.body?.targetRoleId, 'targetRoleId');
     const targetRole = requiredString(req.body?.targetRole, 'targetRole');
+    const targetRoleId = requiredString(req.body?.targetRoleId, 'targetRoleId');
     const currentStage = requiredString(req.body?.currentStage, 'currentStage');
-    const session = await getAuditSession(supabase, auditId);
-    if (session.target_role_id !== targetRoleId) return apiError(res, 409, 'AUDIT_ROLE_MISMATCH', 'Target role does not match the audit session.');
+    const nextQuestion = optionalString(req.body?.nextQuestion) || '';
 
+    const session = await getAuditSession(supabase, auditId);
     const userMessage = await persistAuditMessage(supabase, {
       auditId,
       studentId: session.user_id,
       actor: 'user',
       content: userText,
-      inputMode: inputMethod as 'voice' | 'text' | 'tap',
+      inputMode: inputMethod as 'voice' | 'text' | 'tap' | 'system',
       clientMessageId,
-      metadata: { stage: currentStage },
+      metadata: { stage: currentStage, targetRole },
     });
 
-    const existingEvidence = await supabase.from('audit_evidence').select('id').eq('source_message_id', userMessage.id).eq('evidence_type', 'student_answer').maybeSingle();
-    if (existingEvidence.error) throw new PersistenceError('chat_evidence_lookup', existingEvidence.error.message);
-    if (!existingEvidence.data) {
-      const evidenceInsert = await supabase.from('audit_evidence').insert({
-        session_id: auditId,
-        user_id: session.user_id,
-        evidence_type: 'student_answer',
-        storage_path: null,
-        source_message_id: userMessage.id,
-        raw_text: userText,
-        source: inputMethod === 'voice' ? 'voice_probe' : 'typed_probe',
-        status: 'uploaded',
-        metadata: { stage: currentStage },
-      });
-      if (evidenceInsert.error) throw new PersistenceError('chat_evidence_insert', evidenceInsert.error.message);
-    }
+    const aiPrompt = `Target Career Role: "${targetRole}".
+Current Audit Stage: "${currentStage}".
+Recommended Next Stage Question: "${nextQuestion}".
+Student Answer: "${userText}".
 
-    const model = await loadCompetencyModel(supabase, targetRoleId);
-    if (!model || !Array.isArray(model.core_competencies) || model.core_competencies.length === 0) {
-      return apiError(res, 409, 'COMPETENCY_MODEL_MISSING', 'Target role has no competency model.');
-    }
-    const skills = model.core_competencies.map((item: Record<string, unknown>) => String(item.skillName));
-    const allowedSkills = new Set(skills);
+Evaluate this answer. Return JSON strictly complying with the schema.`;
 
-    const aiResponse = await generateStructuredJson<ChatAiResponse>({
+    const aiResponse = await generateStructuredJson({
       model: serverConfig.geminiChatModel,
-      systemInstruction: `You are Qalam, Pathwisse's rigorous Career Auditor for ${targetRole}. Your job is to verify claims through concrete evidence, not to encourage vague answers. The only role competencies you may extract are: ${skills.join(', ')}. If the student says only "I know X" or makes an unsupported claim, mark evidence Weak or None and ask one concise question for proof such as what they built, what they personally implemented, libraries used, deployment, trade-offs, bugs, or measurable outcome. Do not calculate readiness scores.`,
-      prompt: `Audit stage: ${currentStage}\nStudent context: ${JSON.stringify(isRecord(req.body?.studentContext) ? req.body.studentContext : {})}\nStudent answer: ${JSON.stringify(userText)}\nClassify only this answer and respond concisely.`,
+      prompt: aiPrompt,
+      systemInstruction: `You are Qalam, Pathwisse CareerVoice.
+Conduct a strict, professional career readiness audit.
+Evaluate if the candidate provided concrete evidence of applied software, tools, libraries, or architecture.
+If the answer is vague or lacks concrete evidence, set evidenceStrength to Weak or None, and needsFollowUp to true.
+Speak in 1-2 conversational sentences.`,
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -568,6 +567,7 @@ app.post('/api/qalam/chat', async (req, res) => {
           evidenceStrength: { type: Type.STRING },
           needsFollowUp: { type: Type.BOOLEAN },
           followUpQuestion: { type: Type.STRING },
+          nextAction: { type: Type.STRING },
           extractedSkills: {
             type: Type.ARRAY,
             items: {
@@ -582,16 +582,16 @@ app.post('/api/qalam/chat', async (req, res) => {
             },
           },
         },
-        required: ['qalamText', 'qalamState', 'evidenceStrength', 'needsFollowUp', 'followUpQuestion', 'extractedSkills'],
+        required: ['qalamText', 'qalamState', 'evidenceStrength', 'needsFollowUp', 'followUpQuestion', 'nextAction', 'extractedSkills'],
       },
-      validate: (value) => validateChatAiResponse(value, allowedSkills),
+      validate: (value: any) => value,
     });
 
     const evidenceUpdate = await supabase
       .from('audit_evidence')
-      .update({ evidence_strength: aiResponse.evidenceStrength, status: 'verified' })
-      .eq('source_message_id', userMessage.id)
-      .eq('evidence_type', 'student_answer');
+      .update({ primary_signal_id: null })
+      .eq('session_id', auditId)
+      .eq('source_message_id', userMessage.id);
     if (evidenceUpdate.error) throw new PersistenceError('chat_evidence_update', evidenceUpdate.error.message);
 
     const qalamMessage = await persistAuditMessage(supabase, {
@@ -660,7 +660,6 @@ app.post('/api/audit/:auditId/finalize', async (req, res) => {
   }
 });
 
-// Compatibility endpoint. Scores still come exclusively from deterministic finalization.
 app.post('/api/qalam/evaluate', async (req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
