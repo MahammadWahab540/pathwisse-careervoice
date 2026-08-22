@@ -55,8 +55,43 @@ wss.on('connection', async (clientWs: WebSocket) => {
     return;
   }
 
+  let session: any = null;
+  const pendingClientMessages: any[] = [];
+  const handleClientMessage = (msg: any) => {
+    if (!session) {
+      pendingClientMessages.push(msg);
+      return;
+    }
+
+    if (msg.audio) {
+      session.sendRealtimeInput({
+        audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
+      });
+    } else if (msg.text) {
+      session.sendRealtimeInput({
+        text: msg.text,
+      });
+    } else if (msg.toolResult?.id && msg.toolResult?.name) {
+      session.sendToolResponse({
+        functionResponses: [{
+          id: msg.toolResult.id,
+          name: msg.toolResult.name,
+          response: msg.toolResult.result || { rendered: true },
+        }],
+      });
+    }
+  };
+
+  clientWs.on('message', (rawMsg) => {
+    try {
+      handleClientMessage(JSON.parse(rawMsg.toString()));
+    } catch (e) {
+      console.error('WebSocket Client Msg Error:', e);
+    }
+  });
+
   try {
-    const session = await ai.live.connect({
+    session = await ai.live.connect({
       model: 'gemini-3.1-flash-live-preview',
       config: {
         responseModalities: [Modality.AUDIO],
@@ -114,30 +149,7 @@ For Live sessions, never call show_competency_benchmark unless a verified benchm
       },
     });
 
-    clientWs.on('message', (rawMsg) => {
-      try {
-        const msg = JSON.parse(rawMsg.toString());
-        if (msg.audio) {
-          session.sendRealtimeInput({
-            audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
-          });
-        } else if (msg.text) {
-          session.sendRealtimeInput({
-            text: msg.text,
-          });
-        } else if (msg.toolResult?.id && msg.toolResult?.name) {
-          session.sendToolResponse({
-            functionResponses: [{
-              id: msg.toolResult.id,
-              name: msg.toolResult.name,
-              response: msg.toolResult.result || { rendered: true },
-            }],
-          });
-        }
-      } catch (e) {
-        console.error('WebSocket Client Msg Error:', e);
-      }
-    });
+    pendingClientMessages.splice(0).forEach(handleClientMessage);
 
     clientWs.on('close', () => {
       try {
