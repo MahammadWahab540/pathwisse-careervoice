@@ -23,7 +23,9 @@ import {
 import {
   createOrResumeAuditSession,
   getAuditSession,
+  loadAuditMessages,
   loadCompetencyModel,
+  loadRole,
   loadRoleSkills,
   persistAuditMessage,
   persistSkillSignal,
@@ -314,6 +316,20 @@ app.get('/api/roles', async (req, res) => {
   }
 });
 
+app.get('/api/roles/:roleId', async (req, res) => {
+  const supabase = await requireDatabase(res);
+  if (!supabase) return;
+  try {
+    const roleId = requiredString(req.params.roleId, 'roleId');
+    const role = await loadRole(supabase, roleId);
+    if (!role) return apiError(res, 404, 'ROLE_NOT_FOUND', 'Career role was not found.');
+    const skills = await loadRoleSkills(supabase, [roleId]);
+    return res.json(mapRole(role, skills));
+  } catch (error) {
+    return handleRouteError(res, error, 'role_detail');
+  }
+});
+
 app.post('/api/roles/recommendations', async (req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
@@ -361,6 +377,78 @@ app.get('/api/catalog/competency/:roleId', async (req, res) => {
     });
   } catch (error) {
     return handleRouteError(res, error, 'competency_catalog');
+  }
+});
+
+app.get('/api/audit/:auditId/session', async (req, res) => {
+  const supabase = await requireDatabase(res);
+  if (!supabase) return;
+  try {
+    const auditId = requiredString(req.params.auditId, 'auditId');
+    const session = await getAuditSession(supabase, auditId);
+    let targetRole: Record<string, unknown> | null = null;
+    let competencyModel: Record<string, unknown> | null = null;
+
+    if (session.target_role_id) {
+      const role = await loadRole(supabase, session.target_role_id);
+      if (role) {
+        const skills = await loadRoleSkills(supabase, [session.target_role_id]);
+        targetRole = mapRole(role, skills);
+      }
+      competencyModel = await loadCompetencyModel(supabase, session.target_role_id);
+    }
+
+    const messages = await loadAuditMessages(supabase, auditId);
+    const rawSignals = await supabase
+      .from('audit_skill_signals')
+      .select('id,skill_slug,skill_name,extracted_level,confidence_score,evidence_strength,source,created_at')
+      .eq('session_id', auditId)
+      .order('created_at', { ascending: true });
+
+    const coreCompetencies = (competencyModel?.core_competencies || []) as Array<Record<string, unknown>>;
+    const signals = (rawSignals.data || []) as Array<Record<string, unknown>>;
+
+    const evidenceCoverage = coreCompetencies.map((comp) => {
+      const skillName = String(comp.skillName || comp.skill_name || '');
+      const skillSignals = signals.filter(
+        (s) => String(s.skill_name).toLowerCase() === skillName.toLowerCase()
+      );
+      const strongestSignal = skillSignals[skillSignals.length - 1];
+      const strength = (strongestSignal?.evidence_strength as string) || 'None';
+      let status = 'Insufficient Evidence';
+      if (strength === 'Strong') status = 'Strong Evidence';
+      else if (strength === 'Moderate') status = 'Moderate Evidence';
+      else if (strength === 'Weak') status = 'Weak Evidence';
+
+      return {
+        skillId: String(comp.skillId || comp.skill_id || skillName),
+        skillName,
+        category: String(comp.category || 'Core'),
+        expectedScore: Number(comp.expectedScore || comp.expected_score || 70),
+        evidenceStrength: strength,
+        evidenceStatus: status,
+        confidenceScore: strongestSignal ? Number(strongestSignal.confidence_score || 0) : 0,
+        observationsCount: skillSignals.length,
+      };
+    });
+
+    return res.json({
+      auditId: session.id,
+      studentId: session.user_id,
+      targetRoleId: session.target_role_id,
+      status: session.status,
+      targetRole,
+      messages: messages.map((m) => ({
+        id: m.id,
+        sender: m.actor,
+        text: m.content,
+        timestamp: new Date(m.occurred_at || Date.now()).getTime(),
+        inputMode: m.input_mode,
+      })),
+      evidenceCoverage,
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'audit_session_get');
   }
 });
 
