@@ -27,6 +27,8 @@ import {
   Shield,
   ChevronDown,
   ChevronUp,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface AdaptiveInterviewStepProps {
@@ -366,7 +368,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
         )}
       </AnimatePresence>
 
-      <div className="my-1">
+      <div className="my-1 flex flex-col items-center">
         <QalamCharacter
           state={isAiLoading ? 'THINKING' : isSpeaking ? 'SPEAKING' : isListening ? 'LISTENING' : qalamState}
           audioAmplitude={amplitude}
@@ -374,6 +376,22 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
             if (lastQalamMessage) speakText(lastQalamMessage, () => setQalamState('LISTENING'));
           }}
         />
+        {lastQalamMessage && (
+          <button
+            type="button"
+            onClick={() => {
+              if (isSpeaking) {
+                stopSpeaking();
+              } else {
+                speakText(lastQalamMessage, () => setQalamState('LISTENING'));
+              }
+            }}
+            className="mt-1 flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-700 transition cursor-pointer"
+          >
+            {isSpeaking ? <VolumeX className="w-3.5 h-3.5 text-indigo-600" /> : <Volume2 className="w-3.5 h-3.5 text-indigo-600" />}
+            <span>{isSpeaking ? 'Mute Audio' : 'Play Audio'}</span>
+          </button>
+        )}
       </div>
 
       <VoiceWaveform amplitude={amplitude} isListening={isListening} isSpeaking={isSpeaking} />

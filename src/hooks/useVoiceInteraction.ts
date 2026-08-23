@@ -302,21 +302,24 @@ export function useVoiceInteraction({
           finish();
         };
 
-        // CRITICAL CHROME GC FIX: Store utterance ref to prevent garbage collection mid-speech
+        // CRITICAL CHROME GC FIX: Store utterance globally to prevent garbage collection mid-speech
         utteranceRef.current = utterance;
+        if (typeof window !== 'undefined') {
+          (window as any).__cvActiveUtterance = utterance;
+        }
 
         window.speechSynthesis.speak(utterance);
 
-        // Extra guard for Chrome: force resume if paused
+        // Force resume Chrome audio engine
         try {
-          if (window.speechSynthesis.paused) {
+          if (window.speechSynthesis.paused || !window.speechSynthesis.speaking) {
             window.speechSynthesis.resume();
           }
         } catch (e) {}
 
         // Fallback safety timeout if browser fails to trigger onend/onerror
         const wordCount = text ? text.split(/\s+/).length : 10;
-        const estimatedDurationMs = Math.max(2500, (wordCount / 2.2) * 1000 + 2000);
+        const estimatedDurationMs = Math.max(3000, (wordCount / 2.0) * 1000 + 2000);
         setTimeout(() => {
           if (!hasFinished && isSpeakingRef.current) {
             finish();
