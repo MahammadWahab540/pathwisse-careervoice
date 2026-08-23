@@ -788,9 +788,14 @@ app.get('/api/pricing', async (_req, res) => {
   })));
 });
 
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
 app.post('/api/analytics/track', async (req, res) => {
-  const supabase = await requireDatabase(res);
-  if (!supabase) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    // In local dev without Supabase, acknowledge analytics without throwing 503
+    return res.json({ success: true, mode: 'local_noop' });
+  }
   try {
     const eventName = requiredString(req.body?.eventName, 'eventName');
     const auditId = optionalString(req.body?.auditId);
@@ -814,10 +819,14 @@ app.post('/api/analytics/track', async (req, res) => {
         metadata: isRecord(req.body?.metadata) ? req.body.metadata : {},
       },
     });
-    if (result.error) throw new PersistenceError('analytics_event_insert', result.error.message);
+    if (result.error) {
+      console.warn('Analytics logging notice:', result.error.message);
+      return res.json({ success: true, mode: 'fallback' });
+    }
     return res.json({ success: true });
   } catch (error) {
-    return handleRouteError(res, error, 'analytics_track');
+    console.warn('Analytics tracking error caught:', error instanceof Error ? error.message : error);
+    return res.json({ success: true, mode: 'fallback' });
   }
 });
 

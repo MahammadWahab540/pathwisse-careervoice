@@ -296,7 +296,9 @@ export function useVoiceInteraction({
         };
 
         utterance.onerror = (e) => {
-          console.warn('SpeechSynthesis error:', e);
+          if (e.error !== 'canceled' && e.error !== 'interrupted') {
+            console.warn('SpeechSynthesis notice:', e.error || e);
+          }
           finish();
         };
 
