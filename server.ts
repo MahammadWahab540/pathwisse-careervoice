@@ -485,14 +485,20 @@ app.get('/api/roles/:roleId', async (req, res) => {
 
 app.post('/api/roles/recommendations', async (req, res) => {
   try {
+    const streamId = optionalString(req.body?.careerStreamId);
     const supabase = getSupabase();
     let roles: Array<{ id: string; title: string; category?: string; keySkills: string[]; matchType?: string; fitReason?: string; streamId: string; description: string; demandLevel: string; status: string }> = SEED_CAREER_ROLES.map(mapSeedRole);
     if (supabase) {
       try {
-        roles = (await getPublishedRoles(optionalString(req.body?.careerStreamId))) as typeof roles;
+        roles = (await getPublishedRoles(streamId)) as typeof roles;
       } catch (err) {
         roles = SEED_CAREER_ROLES.map(mapSeedRole);
       }
+    }
+    if (streamId) {
+      const inStream = roles.filter((r) => r.streamId === streamId);
+      const outStream = roles.filter((r) => r.streamId !== streamId);
+      roles = inStream.length > 0 ? [...inStream, ...outStream] : roles;
     }
     const careerIntent = optionalString(req.body?.careerIntent) || '';
     const branch = optionalString(req.body?.branch) || '';
@@ -509,6 +515,81 @@ app.post('/api/roles/recommendations', async (req, res) => {
     return res.json(scored);
   } catch (error) {
     return handleRouteError(res, error, 'role_recommendations');
+  }
+});
+
+app.post('/api/career/guidance', async (req, res) => {
+  try {
+    const question = requiredString(req.body?.question, 'question');
+    const targetRole = optionalString(req.body?.targetRole) || 'Software Engineer';
+    const studentName = optionalString(req.body?.studentProfile?.firstName) || 'Friend';
+    const branch = optionalString(req.body?.studentProfile?.branch) || 'Engineering';
+
+    // Find matched role data from seed or database
+    const matchedRole = SEED_CAREER_ROLES.find(
+      (r) => r.title.toLowerCase() === targetRole.toLowerCase() || r.id === targetRole
+    ) || SEED_CAREER_ROLES[0];
+
+    const gemini = getGeminiClient();
+    if (gemini) {
+      try {
+        const prompt = `You are Qalam, an expert technical career mentor at Pathwisse CareerVoice.
+A candidate (${studentName}, branch: ${branch}) is asking this career question: "${question}"
+Regarding target role: "${targetRole}" (Overview: ${matchedRole.description}, Key Skills: ${matchedRole.key_skills.join(', ')}, Salary: ${matchedRole.salary_range_display}, Demand: ${matchedRole.demand_level}).
+
+Provide a structured, encouraging, highly realistic answer tailored to Indian tech industry standards (product companies, startups, and enterprise).
+
+Return valid JSON with these fields:
+{
+  "spokenSummary": "A concise 2-3 sentence conversational explanation suitable for TTS voice readout.",
+  "dayToDay": ["3-4 clear bullet points describing what someone in this role actually does on a typical day"],
+  "salaryInsight": "A concise 1-sentence description of starting salaries and growth trajectory (e.g. ${matchedRole.salary_range_display})",
+  "demandInsight": "Market demand context for ${targetRole}",
+  "keyPrerequisites": ["4-5 core technical and architectural skills required"],
+  "actionableTip": "One high-impact piece of advice for college students preparing for this track"
+}`;
+
+        const aiResponse = await gemini.models.generateContent({
+          model: serverConfig.geminiChatModel,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+          },
+        });
+
+        const rawText = aiResponse.text;
+        if (rawText) {
+          const parsed = JSON.parse(rawText);
+          return res.json({
+            success: true,
+            roleTitle: matchedRole.title,
+            ...parsed,
+          });
+        }
+      } catch (aiErr) {
+        console.warn('Gemini career guidance fallback:', aiErr);
+      }
+    }
+
+    // Fallback deterministic guidance response
+    return res.json({
+      success: true,
+      roleTitle: matchedRole.title,
+      spokenSummary: `As a ${matchedRole.title}, you will be responsible for ${matchedRole.description.toLowerCase()} Key competencies include ${matchedRole.key_skills.slice(0, 3).join(', ')}.`,
+      dayToDay: [
+        `Architecting and developing core features using ${matchedRole.key_skills[0] || 'core technologies'}`,
+        `Writing clean, maintainable, production-ready code with unit and integration tests`,
+        `Collaborating with product managers and engineers in agile sprint planning`,
+        `Troubleshooting performance bottlenecks and optimizing system reliability`,
+      ],
+      salaryInsight: `Expected entry packages range around ${matchedRole.salary_range_display} with strong 2-3 year growth.`,
+      demandInsight: `${matchedRole.demand_level} hiring demand across high-growth startups and tech enterprises.`,
+      keyPrerequisites: matchedRole.key_skills,
+      actionableTip: `Build and deploy one end-to-end project highlighting ${matchedRole.key_skills[0] || 'your core track'} with clean Git history.`,
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'career_guidance');
   }
 });
 

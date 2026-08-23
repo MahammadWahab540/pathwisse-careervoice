@@ -322,14 +322,30 @@ export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): Ro
   const intentOverlap = tokenOverlap(profile.careerIntent, roleDescriptor);
   const intentScore = Math.round(Math.min(1, intentOverlap * 1.8) * 45);
 
-  const softwareRole = /(engineer|developer|data|cloud|devops|security|machine learning|ai|software)/i.test(
+  const isEceBranch = /(electronics|communication|ece|embedded|vlsi|hardware|telecom)/i.test(profile.branch);
+  const isEceRole = /(embedded|vlsi|hardware|pcb|firmware|iot|semiconductor|robotics|fpga|dsp|telecom)/i.test(
+    `${role.title} ${role.category} ${role.keySkills.join(' ')}`
+  );
+
+  const isCseBranch = /(computer|information technology|software|it|cse|data science|ai|ml)/i.test(profile.branch);
+  const isCseRole = /(software|web|full stack|backend|frontend|devops|cloud|machine learning|data analyst|cybersecurity)/i.test(
     `${role.title} ${role.category}`
   );
-  const softwareBranch = /(computer|information technology|software|electronics|ece|data|ai|machine learning)/i.test(
-    profile.branch
-  );
-  const exactBranchOverlap = tokenOverlap(profile.branch, role.category);
-  const academicScore = exactBranchOverlap >= 0.3 ? 20 : softwareRole && softwareBranch ? 17 : 5;
+
+  let academicScore = 5;
+  const exactCategoryOverlap = tokenOverlap(profile.branch, role.category);
+
+  if (exactCategoryOverlap >= 0.25) {
+    academicScore = 20;
+  } else if (isEceBranch && isEceRole) {
+    academicScore = 20; // Direct disciplinary alignment for ECE
+  } else if (isCseBranch && isCseRole) {
+    academicScore = 20; // Direct disciplinary alignment for CSE
+  } else if (isEceBranch && isCseRole) {
+    academicScore = 14; // ECE students are cross-track eligible for Software, but core ECE ranks higher
+  } else if (isCseBranch && isEceRole) {
+    academicScore = 12;
+  }
 
   const matchedSkills = role.keySkills.filter((required) =>
     profile.knownSkills.some((known) => skillMatches(known, required))
@@ -350,7 +366,8 @@ export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): Ro
 
   const fitReasons: string[] = [];
   if (intentScore >= 20) fitReasons.push(`Your stated career intent aligns with ${role.title}.`);
-  if (academicScore >= 17) fitReasons.push(`Your ${profile.branch} background is relevant to this role family.`);
+  if (academicScore >= 18) fitReasons.push(`Your ${profile.branch} background provides strong core foundations for ${role.category}.`);
+  else if (academicScore >= 14) fitReasons.push(`Your ${profile.branch} background offers transferable problem-solving skills for this track.`);
   if (matchedSkills.length > 0) fitReasons.push(`You already show overlap in ${matchedSkills.slice(0, 3).join(', ')}.`);
   if (fitReasons.length === 0) fitReasons.push('This role is a stretch based on the evidence currently available.');
 

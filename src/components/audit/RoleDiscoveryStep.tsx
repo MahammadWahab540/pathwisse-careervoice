@@ -1,11 +1,12 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { useRoleRecommendations } from '../../hooks/useCareerRoles';
 import { RoleComparisonView } from './RoleComparisonView';
 import type { RoleRecommendationDto } from '../../types/career';
-import { Sparkles, ChevronRight, TrendingUp, Loader2, Scale, RefreshCw, AlertCircle } from 'lucide-react';
+import { Sparkles, ChevronRight, TrendingUp, Loader2, Scale, RefreshCw, AlertCircle, MessageSquareQuote, HelpCircle } from 'lucide-react';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
+import { CareerVoiceConsultant } from './CareerVoiceConsultant';
 
 interface RoleDiscoveryStepProps {
   firstName: string;
@@ -28,6 +29,7 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
   trackEvent,
 }) => {
   const [isComparing, setIsComparing] = useState(false);
+  const [consultantRole, setConsultantRole] = useState<string | null>(null);
   const { isSpeaking, amplitude, speakText, stopSpeaking } = useVoiceInteraction({});
 
   const { data: roles = [], isLoading, error, refetch } = useRoleRecommendations({
@@ -67,19 +69,33 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-[#1f3861]" />
             <span className="text-xs font-bold text-[#0b111e]">Recommended Career Directions</span>
           </div>
-          {recommendedRoles.length > 1 && (
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => {
-                setIsComparing(true);
-                trackEvent('role_comparison_opened');
+                const target = recommendedRoles[0]?.title || 'Software Engineer';
+                setConsultantRole(target);
+                trackEvent('career_voice_consultant_opened', { targetRole: target });
               }}
-              className="text-[10px] font-bold text-[#1f3861] bg-blue-50 border border-blue-200/70 hover:bg-blue-100/70 px-2.5 py-1 rounded-full flex items-center gap-1 transition cursor-pointer"
+              className="text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-200/80 hover:bg-amber-100/80 px-2.5 py-1 rounded-full flex items-center gap-1 transition cursor-pointer shadow-2xs"
             >
-              <Scale className="w-3 h-3" />
-              Compare Tracks
+              <MessageSquareQuote className="w-3 h-3 text-amber-600" />
+              Ask Qalam
             </button>
-          )}
+            {recommendedRoles.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsComparing(true);
+                  trackEvent('role_comparison_opened');
+                }}
+                className="text-[10px] font-bold text-[#1f3861] bg-blue-50 border border-blue-200/70 hover:bg-blue-100/70 px-2.5 py-1 rounded-full flex items-center gap-1 transition cursor-pointer"
+              >
+                <Scale className="w-3 h-3" />
+                Compare
+              </button>
+            )}
+          </div>
         </div>
 
         {isLoading ? (
@@ -148,17 +164,32 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      trackEvent('role_deep_dive_clicked', { roleId: role.id, title: role.title });
-                      onSelectRoleForExplanation(role);
-                    }}
-                    className="w-full py-2.5 px-3 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer shadow-xs"
-                  >
-                    <span>Explore & Audit Readiness</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConsultantRole(role.title);
+                        trackEvent('career_voice_consultant_opened', { targetRole: role.title });
+                      }}
+                      className="py-2.5 px-3 rounded-full bg-slate-100 hover:bg-amber-50 hover:text-amber-900 hover:border-amber-200 border border-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer shadow-2xs"
+                      title={`Ask Qalam what a ${role.title} does`}
+                    >
+                      <MessageSquareQuote className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Ask Qalam</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        trackEvent('role_deep_dive_clicked', { roleId: role.id, title: role.title });
+                        onSelectRoleForExplanation(role);
+                      }}
+                      className="flex-1 py-2.5 px-3 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer shadow-xs"
+                    >
+                      <span>Explore & Audit</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </motion.div>
               );
             })}
@@ -174,6 +205,17 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
             onSelectRoleForExplanation(selectedRole);
           }}
           onClose={() => setIsComparing(false)}
+          trackEvent={trackEvent}
+        />
+      )}
+
+      {consultantRole && (
+        <CareerVoiceConsultant
+          isOpen={Boolean(consultantRole)}
+          onClose={() => setConsultantRole(null)}
+          targetRoleTitle={consultantRole}
+          firstName={firstName}
+          departmentName={departmentName}
           trackEvent={trackEvent}
         />
       )}
