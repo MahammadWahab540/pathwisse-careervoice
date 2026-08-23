@@ -58,7 +58,7 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
     <div className="flex flex-col items-center min-h-[calc(100vh-80px)] px-4 py-5 max-w-md mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
       <QalamCharacter
         state={result.readinessStatus === 'Ready' ? 'CELEBRATING' : 'CURIOUS'}
-        subtitles={`Here is your verified ${role.title} Career Readiness Report, calculated purely from stored evidence against the ${result.hiringBenchmark}/100 benchmark.`}
+        subtitles={`Here is your ${role.title} readiness report, based on the evidence you shared against the ${result.hiringBenchmark}/100 benchmark.`}
       />
 
       <div className="w-full rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-5">
@@ -252,7 +252,7 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
 
       <p className="text-[10px] text-slate-400 flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-        All ratings are derived strictly from persisted evidence.
+        Scores are based on what you shared during this audit.
       </p>
     </div>
   );

@@ -35,15 +35,15 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
       <QalamCharacter
         state={mappedCount > 0 ? 'CELEBRATING' : 'CURIOUS'}
         subtitles={mappedCount > 0
-          ? 'Your highest-priority gaps are now linked to real Pathwisse skills and stages. Nothing here was generated from a generic roadmap template.'
-          : 'Your audit is complete. These gaps are verified, but Pathwisse has not yet configured stable skill and stage mappings for them, so I will not invent roadmap items.'}
+          ? 'Your highest-priority gaps are linked to Pathwisse learning steps.'
+          : 'Your audit is complete. Some gaps need a custom action before a guided lesson is available.'}
       />
 
       <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">career-audit-roadmap-contract:v1</span>
-            <h2 className="text-base font-bold text-[#0b111e] mt-0.5">Pathwisse Gap Handoff</h2>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">Your next actions</span>
+            <h2 className="text-base font-bold text-[#0b111e] mt-0.5">Pathwisse improvement plan</h2>
           </div>
           <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1f3861] flex items-center justify-center"><Map className="w-4 h-4" /></div>
         </div>
@@ -72,8 +72,8 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5">
-                  <p className="text-[10px] font-bold text-amber-900 flex items-center gap-1"><Link2Off className="w-3 h-3" />UNMAPPED</p>
-                  <p className="text-[10px] text-amber-800 mt-1">No stable Pathwisse skill/stage IDs exist for this competency yet. CareerVoice will not create a placeholder learning item.</p>
+                  <p className="text-[10px] font-bold text-amber-900 flex items-center gap-1"><Link2Off className="w-3 h-3" />Custom action needed</p>
+                  <p className="text-[10px] text-amber-800 mt-1">A guided lesson is not ready for this skill yet. Start with the recommended project action.</p>
                 </div>
               )}
             </div>
@@ -86,7 +86,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
 
         <button type="button" onClick={onOpenShare} className="w-full py-2.5 px-4 rounded-full bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"><Share2 className="w-4 h-4 text-[#1f3861]" /><span>Share My Verified Career Card</span></button>
 
-        <div className="text-[9px] text-slate-400 font-mono flex items-center gap-1"><ExternalLink className="w-3 h-3" /><span>Audit {handoff.auditId}</span></div>
+        <div className="text-[9px] text-slate-400 font-medium flex items-center gap-1"><ExternalLink className="w-3 h-3" /><span>Saved to this audit session</span></div>
       </div>
     </div>
   );

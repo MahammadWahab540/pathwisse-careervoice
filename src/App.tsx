@@ -35,7 +35,8 @@ import {
   AuditMessage,
 } from './types';
 import type { CareerRoleDto, RoleRecommendationDto } from './types/career';
-import { RotateCcw, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { PathwisseFrame } from './components/ui/PathwisseUI';
 import { syncProfile } from './api/profile';
 import { createAuditSession, getAuditSession, uploadTextEvidence, finalizeAudit } from './api/audit';
 import { getAuditReport } from './api/reports';
@@ -132,6 +133,8 @@ function MainApp() {
   const [departmentName, setDepartmentName] = useState('Computer Science Engineering');
   const [academicYear, setAcademicYear] = useState('3rd Year');
   const [userRawIntent, setUserRawIntent] = useState('');
+  const [knownSkills, setKnownSkills] = useState<string[]>([]);
+  const [discoveryProfile, setDiscoveryProfile] = useState<Record<string, unknown>>({});
   const [selectedRoleForExploration, setSelectedRoleForExploration] = useState<CareerRoleDto | null>(null);
   const [targetRole, setTargetRole] = useState<CareerRoleTarget | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<AuditMessage[]>([]);
@@ -146,6 +149,26 @@ function MainApp() {
 
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
+
+  const activeJourneyStep = (() => {
+    if (['WELCOME', 'PHONE_OTP', 'ASK_NAME', 'ASK_COLLEGE', 'ASK_DEPARTMENT', 'ASK_YEAR'].includes(currentStep)) return 0;
+    if (currentStep === 'CAREER_DISCOVERY') return 1;
+    if (currentStep === 'ROLE_DISCOVERY') return 2;
+    if (['ROLE_EXPLANATION', 'LOAD_COMPETENCY_MODEL'].includes(currentStep)) return 3;
+    if (['CAREER_READINESS_AUDIT', 'EVIDENCE_UPLOAD'].includes(currentStep)) return 4;
+    if (currentStep === 'PROCESSING') return 5;
+    return 6;
+  })();
+
+  const frameCopy = (() => {
+    if (currentStep === 'WELCOME') return { title: 'Start with where you are', subtitle: 'A guided audit that turns interests, proof, and gaps into one clear next step.' };
+    if (['PHONE_OTP', 'ASK_NAME', 'ASK_COLLEGE', 'ASK_DEPARTMENT', 'ASK_YEAR'].includes(currentStep)) return { title: 'Set your context', subtitle: 'Your branch, year, and campus help Qalam ask the right questions.' };
+    if (currentStep === 'CAREER_DISCOVERY') return { title: 'Discover a direction', subtitle: 'Branch-aware questions help separate core, hybrid, and switch paths.' };
+    if (currentStep === 'ROLE_DISCOVERY') return { title: 'Compare career directions', subtitle: 'Recommendations are ranked by your interests, skills, projects, and intent.' };
+    if (['ROLE_EXPLANATION', 'LOAD_COMPETENCY_MODEL'].includes(currentStep)) return { title: 'Choose what to prove', subtitle: 'Pick one role benchmark before starting the evidence audit.' };
+    if (['CAREER_READINESS_AUDIT', 'EVIDENCE_UPLOAD', 'PROCESSING'].includes(currentStep)) return { title: 'Prove what you know', subtitle: 'Qalam checks your answers and evidence against the selected role.' };
+    return { title: 'Know what to improve', subtitle: 'Your report turns readiness gaps into prioritized action.' };
+  })();
 
   const trackEvent = useCallback(
     (eventName: string, metadata: Record<string, unknown> = {}) => {
@@ -451,45 +474,15 @@ function MainApp() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-[#0b111e] flex flex-col font-sans selection:bg-[#1f3861] selection:text-white">
-      {/* Header Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-white/95 border-b border-[#e1e7ef] backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-2.5 cursor-pointer" onClick={handleRestartAudit}>
-          <div className="w-8 h-8 rounded-full bg-[#1f3861] flex items-center justify-center font-bold text-white text-xs shadow-xs">
-            P
-          </div>
-          <div>
-            <h1 className="text-sm sm:text-base font-extrabold text-[#0b111e] leading-tight tracking-tight">
-              Pathwisse <span className="text-[#1f3861]">CareerVoice</span>
-            </h1>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {auditId && (
-            <span className="hidden sm:inline-block text-[10px] font-mono text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-              Audit {auditId.substring(0, 8)}…
-            </span>
-          )}
-          <button
-            onClick={handleRestartAudit}
-            className="p-2 rounded-full bg-white border border-[#e1e7ef] text-[#344256] hover:text-[#0b111e] hover:bg-[#f8fafc] transition shadow-xs cursor-pointer"
-            title="Restart Audit"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* Main Flow Frame */}
-      <main className="flex-1 flex items-center justify-center p-2 sm:p-4 my-auto">
-        <div className="w-full max-w-[390px] min-h-[780px] border border-[#e1e7ef] rounded-[28px] bg-white shadow-xl shadow-slate-200/50 overflow-hidden relative flex flex-col justify-between">
-          {flowError && (
-            <div className="m-3 p-3 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium">
-              {flowError}
-            </div>
-          )}
-
+    <PathwisseFrame
+      title={frameCopy.title}
+      subtitle={frameCopy.subtitle}
+      activeStep={activeJourneyStep}
+      studentName={firstName}
+      onRestart={handleRestartAudit}
+      auditLabel={auditId ? 'Audit in progress' : null}
+      flowError={flowError || evaluationError}
+    >
           {currentStep === 'WELCOME' && (
             <LandingView
               onStart={() => setCurrentStep('PHONE_OTP')}
@@ -556,11 +549,15 @@ function MainApp() {
 
           {currentStep === 'CAREER_DISCOVERY' && (
             <CareerDiscoveryStep
+              studentId={identity?.studentId}
               firstName={firstName}
               departmentName={departmentName}
               careerStreamId={careerStreamId}
+              academicYear={academicYear}
               onIntentProcessed={(intentData) => {
                 setUserRawIntent(intentData.userRawIntent);
+                setKnownSkills(intentData.knownSkills || []);
+                setDiscoveryProfile(intentData.discoveryProfile || {});
                 setCurrentStep('ROLE_DISCOVERY');
               }}
               trackEvent={trackEvent}
@@ -573,6 +570,10 @@ function MainApp() {
               careerStreamId={careerStreamId}
               departmentName={departmentName}
               userRawIntent={userRawIntent}
+              studentId={identity?.studentId}
+              academicYear={academicYear}
+              knownSkills={knownSkills}
+              discoveryProfile={discoveryProfile}
               onSelectRoleForExplanation={(role) => {
                 setSelectedRoleForExploration(role);
                 setCurrentStep('ROLE_EXPLANATION');
@@ -608,10 +609,9 @@ function MainApp() {
             <LoadCompetencyModelStep
               role={targetRole}
               firstName={firstName}
-              onModelReady={() => {
+              onProceedToAudit={() => {
                 handleStartAuditSession(targetRole);
               }}
-              onBackToRoles={() => setCurrentStep('ROLE_DISCOVERY')}
               trackEvent={trackEvent}
             />
           )}
@@ -654,6 +654,9 @@ function MainApp() {
                 if (auditResult) setCurrentStep('READINESS_REPORT');
               }}
               trackEvent={trackEvent}
+              error={evaluationError}
+              isEvaluating={isEvaluating}
+              onRetry={() => handleGenerateResults(evidence)}
             />
           )}
 
@@ -711,8 +714,7 @@ function MainApp() {
               setAdaptiveToolCalls((calls) => calls.filter((call) => call.id !== callId));
             }}
           />
-        </div>
-      </main>
+      <div className="sr-only" aria-live="polite">{currentStep}</div>
 
       {/* Modals */}
       {auditResult && targetRole && (
@@ -730,7 +732,7 @@ function MainApp() {
         onClose={() => setIsUpgradeOpen(false)}
         trackEvent={trackEvent}
       />
-    </div>
+    </PathwisseFrame>
   );
 }
 

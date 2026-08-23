@@ -97,13 +97,13 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
             </span>
             <div className="text-left">
               <h3 className="text-sm font-extrabold text-[#0b111e] flex items-center gap-1.5">
-                Gemini 3.1 Live Agent
+                Qalam Live Coach
                 <span className="px-1.5 py-0.5 rounded-full bg-[#e1e7ef] text-[9px] font-mono font-bold text-[#1f3861]">
-                  REALTIME
+                  LIVE
                 </span>
               </h3>
               <p className="text-[10px] text-[#344256] font-medium">
-                Low-Latency Native Voice Stream • Role: {targetRole}
+                Voice conversation for {targetRole}
               </p>
             </div>
           </div>
@@ -129,10 +129,10 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
           />
           <span className={isConnected ? 'text-emerald-700 font-bold' : 'text-[#344256]'}>
             {isConnected
-              ? 'Live WebSocket Connected'
+              ? 'Qalam is ready'
               : isConnecting
-              ? 'Connecting Gemini 3.1 Live API...'
-              : 'Disconnected'}
+              ? 'Opening your live voice session...'
+              : 'Voice session paused'}
           </span>
         </div>
 
@@ -166,7 +166,7 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
           {history.length === 0 ? (
             <div className="text-center text-[#344256] text-[11px] py-4 font-medium">
               <Sparkles className="w-4 h-4 text-[#1f3861] mx-auto mb-1 opacity-70 animate-bounce" />
-              Speak directly to Qalam or type below. Gemini 3.1 Live will answer in real-time voice!
+              Speak directly to Qalam or type below. You’ll get a live career response.
             </div>
           ) : (
             history.slice(-4).map((item, idx) => (
@@ -179,7 +179,7 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
                 }`}
               >
                 <span className="text-[10px] uppercase font-mono font-bold block mb-0.5 opacity-70">
-                  {item.sender === 'user' ? 'You' : 'Qalam (Gemini Live)'}
+                  {item.sender === 'user' ? 'You' : 'Qalam'}
                 </span>
                 {item.text}
               </div>
@@ -194,7 +194,7 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Send text prompt over Live session..."
+              placeholder="Ask your career question..."
               className="flex-1 bg-[#f8fafc] border border-[#e1e7ef] rounded-xl px-3.5 py-2 text-xs text-[#0b111e] focus:outline-none focus:border-[#1f3861] transition"
             />
             <button
@@ -219,17 +219,17 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
             >
               {isConnected ? (
                 <>
-                  <MicOff className="w-3.5 h-3.5 text-red-600" /> Disconnect Stream
+                  <MicOff className="w-3.5 h-3.5 text-red-600" /> Pause voice
                 </>
               ) : (
                 <>
-                  <Mic className="w-3.5 h-3.5 text-emerald-600" /> Start Realtime Stream
+                  <Mic className="w-3.5 h-3.5 text-emerald-600" /> Start voice
                 </>
               )}
             </button>
 
-            <span className="text-[#344256] text-[10px] font-mono">
-              Model: gemini-3.1-flash-live-preview
+            <span className="text-[#344256] text-[10px] font-medium">
+              Live guidance
             </span>
           </div>
         </div>

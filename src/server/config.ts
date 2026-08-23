@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+
+dotenv.config({ override: true, quiet: true });
+
 export interface ServerEnvironment {
   [key: string]: string | undefined;
 }
