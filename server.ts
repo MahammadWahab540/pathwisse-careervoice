@@ -255,6 +255,78 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
+app.post('/api/voice/session', async (req, res) => {
+  try {
+    const auditId = requiredString(req.body?.auditId, 'auditId');
+    const targetRole = requiredString(req.body?.targetRole, 'targetRole');
+    const studentName = optionalString(req.body?.studentName) || 'Candidate';
+    const transport = optionalString(req.body?.transport) || 'daily';
+
+    const pipecatUrl = serverConfig.pipecatServiceUrl || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
+    const serviceToken = serverConfig.careervoiceServiceToken || process.env.CAREERVOICE_SERVICE_TOKEN;
+
+    if (!serviceToken) {
+      return apiError(
+        res,
+        500,
+        'VOICE_AUTH_NOT_CONFIGURED',
+        'CAREERVOICE_SERVICE_TOKEN is not configured on the server.'
+      );
+    }
+
+    const pipecatResponse = await fetch(`${pipecatUrl}/api/voice/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken}`,
+      },
+      body: JSON.stringify({
+        auditId,
+        targetRole,
+        studentName,
+        transport,
+      }),
+    });
+
+    if (!pipecatResponse.ok) {
+      const errorText = await pipecatResponse.text();
+      return apiError(
+        res,
+        pipecatResponse.status,
+        'PIPECAT_SESSION_FAILED',
+        `Failed to start voice session: ${errorText}`
+      );
+    }
+
+    const sessionData = await pipecatResponse.json();
+
+    // Optionally record session activity in Supabase
+    const supabase = getSupabase();
+    if (supabase && UUID_RE.test(auditId)) {
+      try {
+        await supabase
+          .from('audit_evidence')
+          .insert({
+            session_id: auditId,
+            source: 'voice_probe',
+            evidence_strength: 'Moderate',
+            raw_text: `Live Pipecat voice session initiated for role: ${targetRole} via ${sessionData.provider || transport}`,
+          })
+          .select();
+      } catch (dbErr) {
+        console.warn('Non-blocking Supabase audit evidence logging warning:', dbErr);
+      }
+    }
+
+    return res.json(sessionData);
+  } catch (error) {
+    if (error instanceof Error && /required/.test(error.message)) {
+      return apiError(res, 400, 'INVALID_REQUEST', error.message);
+    }
+    return handleRouteError(res, error, 'voice_session_proxy');
+  }
+});
+
 app.post('/api/auth/otp/request', async (req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
