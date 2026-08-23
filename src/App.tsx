@@ -585,6 +585,7 @@ function MainApp() {
             <RoleExplanationStep
               role={selectedRoleForExploration}
               firstName={firstName}
+              departmentName={departmentName}
               onConfirmTargetRole={(confirmedRole) => {
                 const target: CareerRoleTarget = {
                   id: confirmedRole.id,
