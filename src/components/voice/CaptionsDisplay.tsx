@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Edit2, Check, X, Volume2, Mic } from 'lucide-react';
 
 interface CaptionsDisplayProps {
@@ -18,6 +19,21 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(lastUserText || '');
+  const [visibleUserText, setVisibleUserText] = useState(lastUserText || '');
+
+  useEffect(() => {
+    setVisibleUserText('');
+    if (!lastUserText) return;
+
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index += Math.max(1, Math.ceil(lastUserText.length / 36));
+      setVisibleUserText(lastUserText.slice(0, index));
+      if (index >= lastUserText.length) window.clearInterval(timer);
+    }, 22);
+
+    return () => window.clearInterval(timer);
+  }, [lastUserText]);
 
   const handleSaveEdit = () => {
     if (editedText.trim() && onEditTranscript) {
@@ -29,8 +45,16 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
   return (
     <div className="w-full max-w-sm mx-auto space-y-2.5">
       {/* Qalam Live Subtitle Box */}
+      <AnimatePresence mode="wait">
       {lastQalamText && (
-        <div className="p-4 rounded-3xl bg-slate-50 border border-slate-200/80 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)]">
+        <motion.div
+          key={lastQalamText}
+          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.98 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          className="p-4 rounded-3xl bg-slate-50 border border-slate-200/80 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)]"
+        >
           <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider mb-1">
             <Volume2 className="w-3.5 h-3.5 animate-pulse text-[#1f3861]" />
             Qalam AI
@@ -38,12 +62,21 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
           <p className="text-xs sm:text-sm text-[#0b111e] font-medium leading-relaxed">
             {lastQalamText}
           </p>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* User Live Transcript Box with Edit Option */}
+      <AnimatePresence mode="wait">
       {lastUserText && (
-        <div className="p-4 rounded-3xl bg-blue-50/60 border border-blue-200/70 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)] relative group">
+        <motion.div
+          key={lastUserText}
+          initial={{ opacity: 0, x: 16, scale: 0.98 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: -10 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          className="p-4 rounded-3xl bg-blue-50/60 border border-blue-200/70 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)] relative group"
+        >
           <div className="flex items-center justify-between text-[10px] font-bold text-[#1f3861] uppercase tracking-wider mb-1">
             <span className="flex items-center gap-1.5">
               <Mic className="w-3.5 h-3.5 text-[#1f3861]" />
@@ -90,11 +123,12 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
             </div>
           ) : (
             <p className="text-xs sm:text-sm text-[#0b111e] leading-relaxed font-medium">
-              "{lastUserText}"
+               "{visibleUserText}"
             </p>
           )}
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 };
