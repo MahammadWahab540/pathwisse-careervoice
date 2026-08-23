@@ -152,7 +152,7 @@ function toSkillSlug(value: string): string {
 export async function persistSkillSignal(
   supabase: SupabaseClient,
   input: SkillSignalInput
-): Promise<{ signalId: string; evidenceId: string }> {
+): Promise<{ signalId: string | null; evidenceId: string }> {
   const session = await getAuditSession(supabase, input.auditId);
   if (input.studentId && input.studentId !== session.user_id) {
     throw new PersistenceError('skill_signal_authorization', 'studentId does not match the audit session.');
@@ -168,7 +168,19 @@ export async function persistSkillSignal(
     if (existing.data?.evidence_id) {
       return { signalId: existing.data.id as string, evidenceId: existing.data.evidence_id as string };
     }
+
+    const existingEvidence = await supabase
+      .from('audit_evidence')
+      .select('id')
+      .eq('session_id', input.auditId)
+      .contains('metadata', { idempotencyKey: input.idempotencyKey })
+      .maybeSingle();
+    if (existingEvidence.data?.id) {
+      return { signalId: null, evidenceId: existingEvidence.data.id as string };
+    }
   }
+
+  const isDemonstrated = input.evidenceStrength === 'Strong' || input.evidenceStrength === 'Moderate';
 
   const evidenceInsert = await supabase
     .from('audit_evidence')
@@ -182,13 +194,23 @@ export async function persistSkillSignal(
       evidence_strength: input.evidenceStrength,
       source: input.source,
       claimed_level: input.claimedLevel || null,
-      status: 'verified',
-      metadata: { skillName: input.skillName, contractVersion: 'career-audit:v1' },
+      status: isDemonstrated ? 'verified' : 'insufficient',
+      metadata: {
+        skillName: input.skillName,
+        contractVersion: 'career-audit:v1',
+        idempotencyKey: input.idempotencyKey || null,
+      },
     })
     .select('id')
     .single();
   if (evidenceInsert.error || !evidenceInsert.data) fail('audit_evidence_insert', evidenceInsert.error);
   const evidenceId = evidenceInsert.data.id as string;
+
+  // Weak or None evidence must NEVER create a demonstrated skill signal row
+  if (!isDemonstrated) {
+    await updateAuditSession(supabase, input.auditId, { status: 'in_progress' });
+    return { signalId: null, evidenceId };
+  }
 
   const signalInsert = await supabase
     .from('audit_skill_signals')
