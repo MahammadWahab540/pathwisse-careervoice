@@ -1,80 +1,151 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { CaptionsDisplay } from '../voice/CaptionsDisplay';
+import { EvidenceCoverageList } from './EvidenceCoverageList';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
-import { QalamState, CareerRoleTarget, AuditMessage, SkillEvidence } from '../../types';
+import { useRoleCompetencies } from '../../hooks/useCareerRoles';
+import { sendQalamChat, submitSkillSignal } from '../../api/audit';
+import type {
+  QalamState,
+  CareerRoleTarget,
+  AuditMessage,
+  SkillEvidence,
+  StudentContext,
+} from '../../types';
+import type { EvidenceCoverageItemDto, EvidenceStrength, EvidenceStatus } from '../../types/audit';
 import type { QalamToolCall } from '../../ai/qalamTools';
-import { Mic, MicOff, Send, SkipForward } from 'lucide-react';
+import {
+  Mic,
+  MicOff,
+  Send,
+  SkipForward,
+  RefreshCw,
+  AlertTriangle,
+  Layers,
+  Shield,
+  ChevronDown,
+  ChevronUp,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 
 interface AdaptiveInterviewStepProps {
+  auditId: string;
+  studentId: string;
+  phone?: string;
   role: CareerRoleTarget;
-  studentContext: any;
+  studentContext: StudentContext;
   firstName?: string;
+  initialMessages?: AuditMessage[];
   onInterviewFinished: (data: {
     messages: AuditMessage[];
     skillsExtracted: SkillEvidence[];
     communicationSample: string;
   }) => void;
   onToolCalls?: (calls: QalamToolCall[]) => void;
-  trackEvent: (eventName: string, metadata?: any) => void;
+  trackEvent: (eventName: string, metadata?: Record<string, unknown>) => void;
+}
+
+type InputMethod = 'voice' | 'type' | 'tap';
+interface RetryTurn {
+  answerText: string;
+  inputMethod: InputMethod;
+  clientMessageId: string;
 }
 
 export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
+  auditId,
+  studentId,
+  phone,
   role,
   studentContext,
   firstName,
+  initialMessages = [],
   onInterviewFinished,
   onToolCalls,
   trackEvent,
 }) => {
-  const [messages, setMessages] = useState<AuditMessage[]>([]);
+  const [messages, setMessages] = useState<AuditMessage[]>(initialMessages);
   const [qalamState, setQalamState] = useState<QalamState>('SPEAKING');
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentTurn, setCurrentTurn] = useState(0);
   const [textInput, setTextInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [extractedSkills, setExtractedSkills] = useState<SkillEvidence[]>([]);
   const [communicationSample, setCommunicationSample] = useState('');
   const [isFollowUpActive, setIsFollowUpActive] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
+  const [retryTurn, setRetryTurn] = useState<RetryTurn | null>(null);
+  const [showCoverageMap, setShowCoverageMap] = useState(false);
 
-  // Fixed 5-Stage Career Readiness Probe
-  const PROBE_QUESTIONS = [
+  const { data: competencyModel } = useRoleCompetencies(role.id);
+
+  const PROBE_STAGES = [
     {
-      id: 'q_clarity',
-      qalamPrompt: `Great! Now I want to understand how close you already are to becoming an ${role.title}. First, why does this role interest you, and what do you think someone in this position actually does day-to-day?`,
-      state: 'CURIOUS' as QalamState,
+      id: 'clarity_stage',
+      prompt: `Great! Now I want to understand how close you already are to becoming an ${role.title}. First, why does this role interest you, and what do you think someone in this position actually does day-to-day?`,
     },
     {
-      id: 'q_evidence_build',
-      qalamPrompt: `Tell me about the most complex tool, project, or task you've built using ${role.keySkills[0] || 'your core technical skills'}. What part did you personally implement?`,
-      state: 'CURIOUS' as QalamState,
+      id: 'technical_core_stage',
+      prompt: `Tell me about the most complex tool, project, or system you've built using ${role.keySkills[0] || 'your core technical skills'}. What part did you personally implement?`,
     },
     {
-      id: 'q_libraries_stack',
-      qalamPrompt: `Which specific libraries, frameworks, or databases did you use in that build? What was the hardest bug or challenge you ran into?`,
-      state: 'CURIOUS' as QalamState,
+      id: 'architecture_stack_stage',
+      prompt: `Which specific libraries, databases, or frameworks did you use in that build? What was the hardest bug or bottleneck you personally resolved?`,
     },
     {
-      id: 'q_communication_60s',
-      qalamPrompt: `Imagine I am a technical hiring manager evaluating candidates for an ${role.title} role. Give me a 60-second professional introduction summarizing who you are and what you've built so far.`,
-      state: 'SPEAKING' as QalamState,
+      id: 'communication_defense_stage',
+      prompt: `Imagine I am a technical hiring manager evaluating candidates for ${role.title}. Give me a concise 60-second professional summary of who you are, what you've built, and why you're ready for this track.`,
     },
     {
-      id: 'q_execution_readiness',
-      qalamPrompt: `How many hours per week can you realistically dedicate to working on your career roadmap, and what usually gets in the way of staying consistent?`,
-      state: 'CURIOUS' as QalamState,
+      id: 'execution_commitment_stage',
+      prompt: `How many hours per week can you realistically dedicate to working on your career roadmap, and what usually gets in the way of staying consistent?`,
     },
   ];
 
+  // Derive dynamic evidence coverage from live extracted skills + competency model
+  const evidenceCoverageItems: EvidenceCoverageItemDto[] = (competencyModel?.coreCompetencies || role.keySkills.map((k, idx) => ({
+    skillId: `comp_${idx}`,
+    skillName: k,
+    category: 'Applied Engineering',
+    expectedScore: 70,
+    importanceWeight: 20,
+    dependencyWeight: 10,
+    employabilityWeight: 20,
+    description: k,
+  }))).map((comp) => {
+    const verified = extractedSkills.filter(
+      (s) => s.skillName.toLowerCase() === comp.skillName.toLowerCase()
+    );
+    const latest = verified[verified.length - 1];
+    const strength: EvidenceStrength = latest?.evidenceStrength || 'None';
+    let status: EvidenceStatus = 'Insufficient Evidence';
+    if (strength === 'Strong') status = 'Strong Evidence';
+    else if (strength === 'Moderate') status = 'Moderate Evidence';
+    else if (strength === 'Weak') status = 'Weak Evidence';
+
+    return {
+      skillId: comp.skillId,
+      skillName: comp.skillName,
+      category: comp.category,
+      expectedScore: comp.expectedScore,
+      demonstratedScore: latest ? latest.confidenceScore : undefined,
+      evidenceStrength: strength,
+      evidenceStatus: status,
+      confidenceScore: latest ? latest.confidenceScore : 0,
+      observationsCount: verified.length,
+    };
+  });
+
   const handleSpeechResult = (text: string) => {
-    if (!text.trim()) return;
-    submitAnswer(text, 'voice');
+    if (text.trim()) void submitAnswer(text.trim(), 'voice');
   };
 
   const handleBargeIn = () => {
     stopSpeaking();
     setQalamState('LISTENING');
-    trackEvent('user_interrupted_qalam');
+    trackEvent('user_interrupted_qalam', { auditId });
   };
 
   const {
@@ -87,204 +158,173 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     stopListening,
     speakText,
     stopSpeaking,
-  } = useVoiceInteraction({
-    onSpeechResult: handleSpeechResult,
-    onBargeIn: handleBargeIn,
-  });
+  } = useVoiceInteraction({ onSpeechResult: handleSpeechResult, onBargeIn: handleBargeIn });
 
-  // Initial Question Setup
   useEffect(() => {
-    const initialPrompt = PROBE_QUESTIONS[0].qalamPrompt;
-    const initialMsg: AuditMessage = {
-      id: `msg_${Date.now()}`,
-      sender: 'qalam',
-      text: initialPrompt,
-      timestamp: Date.now(),
-      qalamState: 'WELCOME',
-    };
+    if (messages.length === 0) {
+      const initialPrompt = PROBE_STAGES[0].prompt;
+      const initialMessage: AuditMessage = {
+        id: `initial_${auditId}`,
+        sender: 'qalam',
+        text: initialPrompt,
+        timestamp: Date.now(),
+        qalamState: 'WELCOME',
+      };
+      setMessages([initialMessage]);
+      setQalamState('SPEAKING');
+      speakText(initialPrompt, () => setQalamState('LISTENING'));
+      trackEvent('career_audit_started', { auditId, role: role.id });
+    }
+    return () => stopSpeaking();
+  }, [auditId, role.id]);
 
-    setMessages([initialMsg]);
-    setQalamState('SPEAKING');
-    speakText(initialPrompt, () => setQalamState('LISTENING'));
-
-    trackEvent('career_audit_started', { questionIndex: 0, role: role.id });
-  }, [role]);
-
-  const submitAnswer = async (answerText: string, inputMethod: 'voice' | 'type' | 'tap') => {
+  const submitAnswer = async (
+    answerText: string,
+    inputMethod: InputMethod,
+    existingClientMessageId?: string
+  ) => {
+    if (isAiLoading) return;
     stopListening();
     stopSpeaking();
+    setTurnError(null);
+    setIsAiLoading(true);
+    setQalamState('THINKING');
 
-    const userMsg: AuditMessage = {
-      id: `usr_${Date.now()}`,
+    const clientMessageId = existingClientMessageId || crypto.randomUUID();
+    const isRetry = Boolean(existingClientMessageId);
+    const userMessage: AuditMessage = {
+      id: clientMessageId,
       sender: 'user',
       text: answerText,
       timestamp: Date.now(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    if (!isRetry) setMessages((prev) => [...prev, userMessage]);
     setTextInput('');
     setTranscript('');
-    setIsAiLoading(true);
-    setQalamState('THINKING');
 
-    if (currentQuestionIndex === 3) {
-      setCommunicationSample(answerText);
-    }
-
-    trackEvent('user_finished_speaking', {
-      questionIndex: currentQuestionIndex,
+    if (currentTurn === 3) setCommunicationSample(answerText);
+    trackEvent('audit_answer_submitted', {
+      auditId,
+      turn: currentTurn,
       inputMethod,
       textLength: answerText.length,
     });
 
     try {
-      const res = await fetch('/api/qalam/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userText: answerText,
-          history: messages,
-          studentContext,
-          targetRole: role.title,
-          targetRoleId: role.id,
-          currentStage: PROBE_QUESTIONS[currentQuestionIndex].id,
-        }),
+      const nextStageIndex = currentTurn < PROBE_STAGES.length - 1 ? currentTurn + 1 : currentTurn;
+      const nextQuestion =
+        currentTurn < PROBE_STAGES.length - 1
+          ? PROBE_STAGES[nextStageIndex].prompt
+          : `Great job, ${firstName || 'there'}. I have collected verifiable evidence against this benchmark.`;
+
+      const data = await sendQalamChat({
+        auditId,
+        userText: answerText,
+        inputMethod,
+        clientMessageId,
+        studentContext: studentContext as unknown as Record<string, unknown>,
+        targetRoleId: role.id,
+        targetRole: role.title,
+        currentStage: PROBE_STAGES[currentTurn].id,
+        nextQuestion,
       });
 
-      const data = await res.json();
-      setIsAiLoading(false);
-
-      if (Array.isArray(data.toolCalls) && data.toolCalls.length > 0) {
-        onToolCalls?.(data.toolCalls as QalamToolCall[]);
+      if (Array.isArray((data as any).toolCalls) && (data as any).toolCalls.length > 0) {
+        onToolCalls?.((data as any).toolCalls as QalamToolCall[]);
         trackEvent('qalam_adaptive_ui_called', {
-          tools: data.toolCalls.map((call: QalamToolCall) => call.name),
-          questionIndex: currentQuestionIndex,
+          tools: (data as any).toolCalls.map((call: QalamToolCall) => call.name),
+          turn: currentTurn,
         });
       }
 
-      if (data.extractedSkills && data.extractedSkills.length > 0) {
-        // Record signals to Supabase backend
-        data.extractedSkills.forEach((s: any) => {
-          fetch('/api/audit/evidence/signal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              studentId: 'current_student',
-              skillName: s.skill,
-              evidenceLevel: s.level || 'Intermediate',
-              confidenceScore: s.confidence || (data.evidenceStrength === 'Strong' ? 90 : data.evidenceStrength === 'Weak' ? 45 : 75),
-              rawAnswerSnippet: answerText.slice(0, 300),
-            }),
-          }).catch((err) => console.warn('Supabase signal record notice:', err));
-        });
+      const persistedSkills: SkillEvidence[] = await Promise.all(
+        (data.extractedSkills || []).map(async (skill) => {
+          const signalData = await submitSkillSignal({
+            auditId,
+            studentId,
+            phone,
+            skillName: skill.skillName,
+            extractedLevel: skill.extractedLevel,
+            confidenceScore: skill.confidenceScore,
+            evidenceStrength: skill.evidenceStrength,
+            rawAnswerSnippet: answerText,
+            source: inputMethod === 'voice' ? 'voice_probe' : 'typed_probe',
+            sourceMessageId: data.sourceMessageId,
+            idempotencyKey: `${data.sourceMessageId}:${skill.skillName.toLowerCase()}`,
+          });
 
-        setExtractedSkills((prev) => [
-          ...prev,
-          ...data.extractedSkills.map((s: any) => ({
-            skillName: s.skill,
-            claimedLevel: 'Intermediate',
-            evidenceLevel: s.level || 'Intermediate',
-            confidenceScore: s.confidence || (data.evidenceStrength === 'Strong' ? 90 : data.evidenceStrength === 'Weak' ? 45 : 75),
-            confidenceLevel: (data.evidenceStrength === 'Strong' ? 'High' : data.evidenceStrength === 'Weak' ? 'Low' : 'Medium') as 'High' | 'Medium' | 'Low',
-            mappedEvidence: answerText.slice(0, 100),
-          })),
-        ]);
-      }
+          return {
+            skillName: skill.skillName,
+            extractedLevel: skill.extractedLevel,
+            confidenceScore: skill.confidenceScore,
+            confidenceLevel: skill.confidenceScore >= 80 ? 'High' : skill.confidenceScore >= 55 ? 'Medium' : 'Low',
+            evidenceStrength: skill.evidenceStrength,
+            rawAnswerSnippet: answerText,
+            source: inputMethod === 'voice' ? 'voice_probe' : 'typed_probe',
+            signalId: signalData.signalId,
+            evidenceId: signalData.evidenceId,
+          } as SkillEvidence;
+        })
+      );
 
-      // If weak evidence detected and not already probing follow-up for this question
-      const hasFollowUp = (data.needsFollowUp || data.evidenceStrength === 'Weak') && data.followUpQuestion && !isFollowUpActive;
+      const nextSkills = [...extractedSkills, ...persistedSkills];
+      setExtractedSkills(nextSkills);
 
-      if (hasFollowUp) {
+      const qalamMessage: AuditMessage = {
+        id: data.qalamMessageId || crypto.randomUUID(),
+        sender: 'qalam',
+        text: data.qalamText,
+        timestamp: Date.now(),
+        qalamState: (data.qalamState as QalamState) || 'CURIOUS',
+      };
+      const nextMessages = [...messages, ...(isRetry ? [] : [userMessage]), qalamMessage];
+      setMessages(nextMessages);
+      setRetryTurn(null);
+
+      if (data.needsFollowUp) {
         setIsFollowUpActive(true);
-        const followUpText = `${data.qalamText} ${data.followUpQuestion}`;
-        const newState = 'CURIOUS';
-
-        const newQalamMsg: AuditMessage = {
-          id: `qlm_${Date.now()}`,
-          sender: 'qalam',
-          text: followUpText,
-          timestamp: Date.now(),
-          qalamState: newState,
-        };
-
-        setMessages((prev) => [...prev, newQalamMsg]);
         setQalamState('SPEAKING');
-
-        speakText(followUpText, () => {
-          setQalamState('LISTENING');
-        });
+        speakText(data.qalamText, () => setQalamState('LISTENING'));
         return;
       }
 
-      // Reset follow-up flag if it was active
-      if (isFollowUpActive) {
-        setIsFollowUpActive(false);
-      }
-
-      if (currentQuestionIndex < PROBE_QUESTIONS.length - 1) {
-        const nextIdx = currentQuestionIndex + 1;
-        setCurrentQuestionIndex(nextIdx);
-
-        const nextQalamText = `${data.qalamText} ${PROBE_QUESTIONS[nextIdx].qalamPrompt}`;
-        const newState = (data.qalamState as QalamState) || 'CURIOUS';
-
-        const newQalamMsg: AuditMessage = {
-          id: `qlm_${Date.now()}`,
-          sender: 'qalam',
-          text: nextQalamText,
-          timestamp: Date.now(),
-          qalamState: newState,
-        };
-
-        setMessages((prev) => [...prev, newQalamMsg]);
+      setIsFollowUpActive(false);
+      if (currentTurn < PROBE_STAGES.length - 1) {
+        const nextIndex = currentTurn + 1;
+        setCurrentTurn(nextIndex);
         setQalamState('SPEAKING');
-
-        speakText(nextQalamText, () => {
-          setQalamState('LISTENING');
-        });
-
-        trackEvent(`audit_progress_${nextIdx * 20}`);
+        speakText(data.qalamText, () => setQalamState('LISTENING'));
       } else {
-        const finalQalamText = `${data.qalamText} Excellent work, ${firstName || 'friend'}! I have mapped your skill signals and baseline confidence. Let's inspect your project evidence next.`;
         setQalamState('CELEBRATING');
-
-        speakText(finalQalamText, () => {
+        speakText(data.qalamText, () => {
           onInterviewFinished({
-            messages,
-            skillsExtracted: extractedSkills,
+            messages: nextMessages,
+            skillsExtracted: nextSkills,
             communicationSample: communicationSample || answerText,
           });
         });
       }
-    } catch (err) {
-      console.error('Qalam Chat Error:', err);
-      setIsAiLoading(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'This audit turn could not be completed.';
+      console.error('career_audit_turn_failed', { auditId, turn: currentTurn, message });
+      setTurnError(message);
+      setRetryTurn({ answerText, inputMethod, clientMessageId });
       setQalamState('ENCOURAGING');
-
-      if (currentQuestionIndex < PROBE_QUESTIONS.length - 1) {
-        const nextIdx = currentQuestionIndex + 1;
-        setCurrentQuestionIndex(nextIdx);
-        const fallbackText = PROBE_QUESTIONS[nextIdx].qalamPrompt;
-        speakText(fallbackText, () => setQalamState('LISTENING'));
-      } else {
-        onInterviewFinished({
-          messages,
-          skillsExtracted: extractedSkills,
-          communicationSample: communicationSample || answerText,
-        });
-      }
+      trackEvent('career_audit_turn_failed', { auditId, turn: currentTurn, message });
+    } finally {
+      setIsAiLoading(false);
     }
   };
 
   const handleManualTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!textInput.trim()) return;
-    submitAnswer(textInput.trim(), 'type');
+    if (textInput.trim()) void submitAnswer(textInput.trim(), 'type');
   };
 
-  const handleSkipQuestion = () => {
-    trackEvent('voice_question_skipped', { questionIndex: currentQuestionIndex });
-    submitAnswer("I'm not completely sure about this yet. Let's move to the next question.", 'tap');
+  const handleSkip = () => {
+    trackEvent('voice_question_skipped', { auditId, turn: currentTurn });
+    void submitAnswer('I have not built this yet.', 'tap');
   };
 
   const lastQalamMessage = [...messages].reverse().find((m) => m.sender === 'qalam')?.text;
@@ -292,119 +332,165 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
 
   return (
     <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-4 max-w-sm mx-auto text-center selection:bg-[#1f3861] selection:text-white">
-      {/* Audit Header Stage Progress */}
+      {/* Evidence Coverage Status Header (Replaces fixed 1/5 question counter) */}
       <div className="w-full flex items-center justify-between text-xs mb-2 px-1">
         <div className="flex items-center gap-1.5 font-bold text-[#0b111e]">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-          <span>Target:</span>
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Auditing:</span>
           <span className="text-[#1f3861]">{role.title}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="flex gap-1">
-            {PROBE_QUESTIONS.map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i < currentQuestionIndex
-                    ? 'w-4 bg-emerald-500'
-                    : i === currentQuestionIndex
-                    ? 'w-6 bg-[#1f3861]'
-                    : 'w-2 bg-slate-200'
-                }`}
-              />
-            ))}
-          </div>
-          <span className="text-[#1f3861] font-mono text-[10px] font-bold ml-1">
-            {currentQuestionIndex + 1}/{PROBE_QUESTIONS.length}
+
+        <button
+          type="button"
+          onClick={() => setShowCoverageMap(!showCoverageMap)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200/80 text-[10px] font-bold text-[#1f3861] hover:bg-blue-100 transition cursor-pointer"
+        >
+          <Shield className="w-3 h-3" />
+          <span>
+            {evidenceCoverageItems.filter((i) => i.evidenceStrength !== 'None').length} /{' '}
+            {evidenceCoverageItems.length} Covered
           </span>
-        </div>
+          {showCoverageMap ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
       </div>
 
-      {/* Main Living Qalam Character */}
-      <div className="my-1">
+      {/* Expandable Live Evidence Coverage Map */}
+      <AnimatePresence>
+        {showCoverageMap && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="w-full mb-2 overflow-hidden"
+          >
+            <EvidenceCoverageList items={evidenceCoverageItems} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="my-1 flex flex-col items-center">
         <QalamCharacter
           state={isAiLoading ? 'THINKING' : isSpeaking ? 'SPEAKING' : isListening ? 'LISTENING' : qalamState}
           audioAmplitude={amplitude}
           onSpeak={() => {
-            if (lastQalamMessage) {
-              speakText(lastQalamMessage, () => setQalamState('LISTENING'));
-            }
+            if (lastQalamMessage) speakText(lastQalamMessage, () => setQalamState('LISTENING'));
           }}
         />
+        {lastQalamMessage && (
+          <button
+            type="button"
+            onClick={() => {
+              if (isSpeaking) {
+                stopSpeaking();
+              } else {
+                speakText(lastQalamMessage, () => setQalamState('LISTENING'));
+              }
+            }}
+            className="mt-1 flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-700 transition cursor-pointer"
+          >
+            {isSpeaking ? <VolumeX className="w-3.5 h-3.5 text-indigo-600" /> : <Volume2 className="w-3.5 h-3.5 text-indigo-600" />}
+            <span>{isSpeaking ? 'Mute Audio' : 'Play Audio'}</span>
+          </button>
+        )}
       </div>
 
-      {/* Audio Reactive Waveform Indicator */}
       <VoiceWaveform amplitude={amplitude} isListening={isListening} isSpeaking={isSpeaking} />
 
-      {/* Live Captions Display */}
       <div className="w-full my-2">
+        <AnimatePresence>
+          {isFollowUpActive && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="mx-auto mb-2 w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-bold text-amber-800 shadow-sm"
+            >
+              Probing technical evidence · clarifying
+            </motion.div>
+          )}
+        </AnimatePresence>
         <CaptionsDisplay
           lastQalamText={lastQalamMessage}
           lastUserText={lastUserMessage}
-          onEditTranscript={(newText) => submitAnswer(newText, 'type')}
+          onEditTranscript={(newText) => void submitAnswer(newText, 'type')}
           isListening={isListening}
           isSpeaking={isSpeaking}
         />
       </div>
 
-      {/* Interaction Control Area */}
+      {turnError && retryTurn && (
+        <div className="w-full mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-relaxed text-rose-800 font-medium">{turnError}</p>
+          </div>
+          <button
+            type="button"
+            disabled={isAiLoading}
+            onClick={() => void submitAnswer(retryTurn.answerText, retryTurn.inputMethod, retryTurn.clientMessageId)}
+            className="ml-6 text-[11px] font-bold text-[#1f3861] flex items-center gap-1 cursor-pointer"
+          >
+            <RefreshCw className="w-3 h-3" /> Retry saved answer
+          </button>
+        </div>
+      )}
+
+      {/* Input Controls */}
       <div className="w-full space-y-3 mt-1">
-        {/* Microphone Button */}
         <div className="flex items-center justify-center">
           <button
             type="button"
+            disabled={isAiLoading || Boolean(turnError)}
             onClick={() => {
-              if (isListening) {
-                stopListening();
-              } else {
-                startListening();
-              }
+              if (isListening) stopListening();
+              else startListening();
             }}
-            className={`p-5 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 flex items-center justify-center cursor-pointer active:scale-95 ${
+            className={`p-5 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 flex items-center justify-center cursor-pointer active:scale-95 disabled:opacity-40 ${
               isListening
-                ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200 ring-8 ring-rose-100 animate-pulse'
-                : 'bg-[#1f3861] hover:bg-[#182c4d] text-white shadow-blue-100 hover:shadow-blue-200'
+                ? 'bg-rose-500 hover:bg-rose-600 text-white ring-8 ring-rose-100 animate-pulse'
+                : 'bg-[#1f3861] hover:bg-[#182c4d] text-white shadow-blue-100'
             }`}
           >
-            {isListening ? (
-              <MicOff className="w-7 h-7 animate-pulse" />
-            ) : (
-              <Mic className="w-7 h-7" />
-            )}
+            {isListening ? <MicOff className="w-7 h-7 animate-pulse" /> : <Mic className="w-7 h-7" />}
           </button>
         </div>
 
         <p className="text-[11px] text-slate-500 font-medium">
-          {isListening ? 'Listening... Tap when done' : isSpeaking ? 'Qalam speaking... (tap mic to answer)' : 'Tap mic to respond by voice'}
+          {isAiLoading
+            ? 'Extracting and verifying evidence…'
+            : isListening
+            ? 'Listening... Tap mic when done speaking'
+            : isSpeaking
+            ? 'Qalam speaking... (tap mic to respond)'
+            : 'Tap mic to answer by voice'}
         </p>
 
-        {/* Text Input Fallback */}
         <form onSubmit={handleManualTextSubmit} className="flex gap-2">
           <input
             type="text"
             value={textInput}
             onChange={(e) => setTextInput(e.target.value)}
-            placeholder="Type your response instead..."
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-4 py-2.5 text-xs text-[#0b111e] font-medium focus:outline-none focus:border-[#1f3861] focus:bg-white transition"
+            disabled={isAiLoading || Boolean(turnError)}
+            placeholder="Type your answer instead..."
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-4 py-2.5 text-xs text-[#0b111e] font-medium focus:outline-none focus:border-[#1f3861] focus:bg-white transition disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={!textInput.trim() || isAiLoading}
+            disabled={!textInput.trim() || isAiLoading || Boolean(turnError)}
             className="px-4 py-2.5 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs transition disabled:opacity-40 flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
           >
             <Send className="w-3.5 h-3.5" />
           </button>
         </form>
 
-        {/* Skip Question */}
         <div className="flex items-center justify-center pt-0.5">
           <button
             type="button"
-            onClick={handleSkipQuestion}
-            className="text-[11px] text-slate-400 hover:text-[#1f3861] transition flex items-center gap-1 font-semibold cursor-pointer"
+            disabled={isAiLoading || Boolean(turnError)}
+            onClick={handleSkip}
+            className="text-[11px] text-slate-400 hover:text-[#1f3861] disabled:opacity-40 transition flex items-center gap-1 font-semibold cursor-pointer"
           >
-            <SkipForward className="w-3 h-3" />
-            Skip this question
+            <SkipForward className="w-3 h-3" /> Skip / No direct experience
           </button>
         </div>
       </div>
