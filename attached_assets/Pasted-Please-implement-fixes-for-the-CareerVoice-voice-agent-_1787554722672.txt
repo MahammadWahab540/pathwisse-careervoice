@@ -1,0 +1,43 @@
+Please implement fixes for the CareerVoice voice-agent interview flow.
+
+Issues to fix:
+1. The AI’s first interview speech is triggered from React useEffect, which can be blocked or delayed by browser autoplay rules.
+2. The microphone button has a click handler, but permission and speech-recognition failures are not visible to the user, so it appears unresponsive.
+3. SpeechRecognition may be recreated across renders and recognition.start() errors may be swallowed.
+4. The expected flow should be:
+Select Career → AI Automatically Asks Question → User Clicks Voice Icon → Microphone Activates → User Answers → AI Processes Answer → AI Asks Next Question
+
+Required implementation:
+- Make the initial interview speech user-gesture safe.
+- Start the first AI utterance from the user-triggered action that begins the interview, not only from useEffect.
+- If a browser still blocks speech, show a visible retry/play state with a clear message.
+- Track speechSynthesis onstart, onend, and onerror.
+- Do not mark AI as speaking unless onstart fires.
+- Return and render microphone states from the voice hook:
+  - requesting microphone permission
+  - permission denied
+  - microphone unavailable
+  - browser speech recognition unsupported
+  - listening successfully
+- Add a visible fallback to typed input when voice input cannot start.
+- Stabilize the SpeechRecognition lifecycle:
+  - do not recreate recognition instances on every render
+  - memoize callbacks or use refs
+  - clean up recognition handlers on unmount
+  - set listening only after recognition.onstart fires
+- Stop swallowing recognition.start() errors.
+- Only treat a real “already started” / InvalidStateError as benign.
+- Display other recognition errors to the user.
+- Prevent duplicate mic taps while microphone startup is pending.
+- Verify no overlay, adaptive card, or z-index layer blocks the microphone button on mobile or small screens.
+- Preserve the current UI style and existing interview logic.
+
+After implementing:
+- Run the app and test the full flow:
+  Select Career → interview starts → AI speaks first question → user clicks mic → browser asks permission → listening state appears → transcript is captured → AI asks next question.
+- Test at least Chrome desktop and mobile viewport.
+- Give me a short report with:
+  - files changed
+  - what was fixed
+  - how you verified it
+  - any remaining browser/device limitations
