@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { LandingView } from './components/audit/LandingView';
 import { PhoneOtpStep } from './components/audit/PhoneOtpStep';
@@ -6,7 +7,7 @@ import { AskNameStep } from './components/audit/AskNameStep';
 import { AskCollegeStep } from './components/audit/AskCollegeStep';
 import { AskDepartmentStep } from './components/audit/AskDepartmentStep';
 import { AskYearStep } from './components/audit/AskYearStep';
-import { CareerIntentStep } from './components/audit/CareerIntentStep';
+import { CareerDiscoveryStep } from './components/audit/CareerDiscoveryStep';
 import { RoleDiscoveryStep } from './components/audit/RoleDiscoveryStep';
 import { RoleExplanationStep } from './components/audit/RoleExplanationStep';
 import { LoadCompetencyModelStep } from './components/audit/LoadCompetencyModelStep';
@@ -18,13 +19,8 @@ import { GapReportView } from './components/audit/GapReportView';
 import { RoadmapView } from './components/audit/RoadmapView';
 import { ShareCardModal } from './components/audit/ShareCardModal';
 import { UpgradeModal } from './components/audit/UpgradeModal';
-import { ReAuditModal } from './components/audit/ReAuditModal';
-import { SupabaseConfigModal } from './components/audit/SupabaseConfigModal';
 import { AdaptiveToolSurface } from './components/adaptive-ui/AdaptiveToolSurface';
 
-import { CareerRole, CONSUMER_CAREER_ROLES } from './data/careerTaxonomy';
-import { PATHWISSE_ROLES } from './data/knowledgeGraph';
-import { readinessStatusForScore } from './domain/careerAudit';
 import {
   type AdaptiveEvidenceSubmission,
   type QalamToolCall,
@@ -32,22 +28,38 @@ import {
 } from './ai/qalamTools';
 import {
   UserIdentity,
-  StudentContext,
   CareerRoleTarget,
-  AuditMessage,
-  SkillEvidence,
   EvidenceUploads,
   CareerAuditResult,
+  CareerGap,
+  AuditMessage,
 } from './types';
+import type { CareerRoleDto, RoleRecommendationDto } from './types/career';
+import { Loader2 } from 'lucide-react';
+import { PathwisseFrame } from './components/ui/PathwisseUI';
+import { syncProfile } from './api/profile';
+import { createAuditSession, getAuditSession, uploadTextEvidence, finalizeAudit } from './api/audit';
+import { getAuditReport } from './api/reports';
+import { getRoadmapHandoff } from './api/roadmap';
+import { trackAnalyticsEvent } from './api/analytics';
 
-type AuditStep =
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+export type AuditStep =
   | 'WELCOME'
   | 'PHONE_OTP'
   | 'ASK_NAME'
   | 'ASK_COLLEGE'
   | 'ASK_DEPARTMENT'
   | 'ASK_YEAR'
-  | 'CAREER_INTENT'
+  | 'CAREER_DISCOVERY'
   | 'ROLE_DISCOVERY'
   | 'ROLE_EXPLANATION'
   | 'LOAD_COMPETENCY_MODEL'
@@ -58,56 +70,114 @@ type AuditStep =
   | 'GAP_REPORT'
   | 'ROADMAP';
 
-type EvaluationResponse = Partial<CareerAuditResult> & {
-  success?: boolean;
-  error?: string;
-  toolCalls?: QalamToolCall[];
-};
+interface ApiGap {
+  gapId: string;
+  skillId: string;
+  skillName: string;
+  expectedScore: number;
+  demonstratedScore: number;
+  gap: number;
+  priorityWeight: number;
+  weightedGap: number;
+  priority: 'Critical' | 'High' | 'Medium' | 'Low';
+  evidenceIds: string[];
+  signalIds: string[];
+  evidenceBasis: string;
+  recommendedAction: string;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  recommendedPathwisseSkillId?: string;
+  recommendedStageIds: string[];
+}
 
-export function App() {
+function severityFromPriority(priority: ApiGap['priority']): 'RED' | 'ORANGE' | 'GREEN' {
+  if (priority === 'Critical' || priority === 'High') return 'RED';
+  if (priority === 'Medium') return 'ORANGE';
+  return 'GREEN';
+}
+
+function toCareerGap(gap: ApiGap): CareerGap {
+  return {
+    id: gap.gapId,
+    gapId: gap.gapId,
+    skillId: gap.skillId,
+    title: gap.skillName,
+    skillName: gap.skillName,
+    severity: severityFromPriority(gap.priority),
+    priority: gap.priority,
+    description: `Expected ${gap.expectedScore}; demonstrated ${gap.demonstratedScore}; gap ${gap.gap}.`,
+    expectedScore: gap.expectedScore,
+    demonstratedScore: gap.demonstratedScore,
+    gap: gap.gap,
+    priorityWeight: gap.priorityWeight,
+    weightedGap: gap.weightedGap,
+    recommendedAction: gap.recommendedAction,
+    recommendedPathwisseSkillId: gap.recommendedPathwisseSkillId,
+    recommendedStageIds: gap.recommendedStageIds,
+    mappingStatus: gap.mappingStatus,
+    evidenceBasis: gap.evidenceBasis,
+    evidenceIds: gap.evidenceIds,
+    signalIds: gap.signalIds,
+  };
+}
+
+function MainApp() {
   const [currentStep, setCurrentStep] = useState<AuditStep>('WELCOME');
+  const guestSessionId = useRef(crypto.randomUUID());
 
-  // Core Journey State
   const [identity, setIdentity] = useState<UserIdentity | null>(null);
-  const [firstName, setFirstName] = useState<string>('');
-  const [collegeName, setCollegeName] = useState<string>('');
-  const [collegeId, setCollegeId] = useState<string>('');
-  const [careerStreamId, setCareerStreamId] = useState<string>('cs_eng');
-  const [departmentName, setDepartmentName] = useState<string>('Computer Science Engineering');
-  const [academicYear, setAcademicYear] = useState<string>('3rd Year');
-  const [userRawIntent, setUserRawIntent] = useState<string>('');
-
-  const [selectedRoleForExploration, setSelectedRoleForExploration] = useState<CareerRole | null>(null);
-  const [targetRole, setTargetRole] = useState<CareerRoleTarget>(PATHWISSE_ROLES[0]);
-
-  const [interviewMessages, setInterviewMessages] = useState<AuditMessage[]>([]);
-  const [skillsExtracted, setSkillsExtracted] = useState<SkillEvidence[]>([]);
-  const [communicationSample, setCommunicationSample] = useState('');
+  const [auditId, setAuditId] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState('');
+  const [collegeName, setCollegeName] = useState('');
+  const [collegeId, setCollegeId] = useState('');
+  const [careerStreamId, setCareerStreamId] = useState('cs_eng');
+  const [departmentName, setDepartmentName] = useState('Computer Science Engineering');
+  const [academicYear, setAcademicYear] = useState('3rd Year');
+  const [userRawIntent, setUserRawIntent] = useState('');
+  const [knownSkills, setKnownSkills] = useState<string[]>([]);
+  const [discoveryProfile, setDiscoveryProfile] = useState<Record<string, unknown>>({});
+  const [selectedRoleForExploration, setSelectedRoleForExploration] = useState<CareerRoleDto | null>(null);
+  const [targetRole, setTargetRole] = useState<CareerRoleTarget | null>(null);
+  const [restoredMessages, setRestoredMessages] = useState<AuditMessage[]>([]);
   const [evidence, setEvidence] = useState<EvidenceUploads>({});
+  const [persistedEvidenceKeys, setPersistedEvidenceKeys] = useState<Record<string, boolean>>({});
   const [auditResult, setAuditResult] = useState<CareerAuditResult | null>(null);
-  const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [flowError, setFlowError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [adaptiveToolCalls, setAdaptiveToolCalls] = useState<QalamToolCall[]>([]);
 
-  // Modals
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
-  const [isReAuditOpen, setIsReAuditOpen] = useState(false);
-  const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
 
-  const handleToolCalls = useCallback((calls: QalamToolCall[]) => {
-    if (!calls.length) return;
-    setAdaptiveToolCalls((existing) => mergeQalamToolCalls(existing, calls));
-  }, []);
+  const activeJourneyStep = (() => {
+    if (['WELCOME', 'PHONE_OTP', 'ASK_NAME', 'ASK_COLLEGE', 'ASK_DEPARTMENT', 'ASK_YEAR'].includes(currentStep)) return 0;
+    if (currentStep === 'CAREER_DISCOVERY') return 1;
+    if (currentStep === 'ROLE_DISCOVERY') return 2;
+    if (['ROLE_EXPLANATION', 'LOAD_COMPETENCY_MODEL'].includes(currentStep)) return 3;
+    if (['CAREER_READINESS_AUDIT', 'EVIDENCE_UPLOAD'].includes(currentStep)) return 4;
+    if (currentStep === 'PROCESSING') return 5;
+    return 6;
+  })();
 
-  // Strict Analytics Event Tracker
+  const frameCopy = (() => {
+    if (currentStep === 'WELCOME') return { title: 'Start with where you are', subtitle: 'A guided audit that turns interests, proof, and gaps into one clear next step.' };
+    if (['PHONE_OTP', 'ASK_NAME', 'ASK_COLLEGE', 'ASK_DEPARTMENT', 'ASK_YEAR'].includes(currentStep)) return { title: 'Set your context', subtitle: 'Your branch, year, and campus help Qalam ask the right questions.' };
+    if (currentStep === 'CAREER_DISCOVERY') return { title: 'Discover a direction', subtitle: 'Branch-aware questions help separate core, hybrid, and switch paths.' };
+    if (currentStep === 'ROLE_DISCOVERY') return { title: 'Compare career directions', subtitle: 'Recommendations are ranked by your interests, skills, projects, and intent.' };
+    if (['ROLE_EXPLANATION', 'LOAD_COMPETENCY_MODEL'].includes(currentStep)) return { title: 'Choose what to prove', subtitle: 'Pick one role benchmark before starting the evidence audit.' };
+    if (['CAREER_READINESS_AUDIT', 'EVIDENCE_UPLOAD', 'PROCESSING'].includes(currentStep)) return { title: 'Prove what you know', subtitle: 'Qalam checks your answers and evidence against the selected role.' };
+    return { title: 'Know what to improve', subtitle: 'Your report turns readiness gaps into prioritized action.' };
+  })();
+
   const trackEvent = useCallback(
-    (eventName: string, metadata: Record<string, any> = {}) => {
+    (eventName: string, metadata: Record<string, unknown> = {}) => {
       const payload = {
         eventName,
-        anonymousId: identity?.anonymousId || 'anon_guest',
-        sessionId: identity?.sessionId || `sess_${Date.now()}`,
-        auditId: `audit_${Date.now()}`,
+        studentId: identity?.studentId,
+        anonymousId: identity?.anonymousId || guestSessionId.current,
+        sessionId: identity?.sessionId || guestSessionId.current,
+        auditId: auditId || undefined,
         screenName: currentStep,
         careerRole: targetRole?.id || selectedRoleForExploration?.id,
         collegeId: collegeId || identity?.collegeId,
@@ -116,135 +186,303 @@ export function App() {
         metadata,
       };
 
-      fetch('/api/analytics/track', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch((e) => console.warn('Analytics tracking error:', e));
-
+      trackAnalyticsEvent(payload);
     },
-    [identity, currentStep, targetRole, selectedRoleForExploration, collegeId]
+    [identity, auditId, currentStep, targetRole, selectedRoleForExploration, collegeId]
   );
 
-  const handleAdaptiveEvidence = useCallback((submission: AdaptiveEvidenceSubmission) => {
-    setEvidence((current) => ({
-      ...current,
-      adaptiveEvidence: [...(current.adaptiveEvidence || []), submission],
-    }));
-    trackEvent('adaptive_evidence_attached', {
-      skillName: submission.skillName,
-      hasFile: Boolean(submission.fileName),
-      hasUrl: Boolean(submission.url),
-    });
-  }, [trackEvent]);
+  const handleToolCalls = useCallback((incomingCalls: QalamToolCall[]) => {
+    setAdaptiveToolCalls((existing) => mergeQalamToolCalls(existing, incomingCalls));
+  }, []);
 
-  // Handle Evaluation & Audit Score Generation
-  const handleGenerateResults = async (evidenceOverride?: EvidenceUploads) => {
+  const handleAdaptiveEvidence = useCallback(
+    async (submission: AdaptiveEvidenceSubmission) => {
+      if (!auditId) return;
+      try {
+        const rawText = submission.url || submission.note || submission.fileName || '';
+        const source = submission.url?.includes('github') ? 'github' : 'project';
+        await uploadTextEvidence({
+          auditId,
+          evidenceType: 'adaptive_evidence',
+          rawText,
+          source,
+          metadata: { skillName: submission.skillName },
+        });
+      } catch (err) {
+        console.warn('Adaptive evidence upload notice:', err);
+      }
+    },
+    [auditId]
+  );
+
+  // Resume / Restore Session on Page Refresh
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const storedAuditId = searchParams.get('auditId') || localStorage.getItem('careervoice_active_audit_id');
+    const storedStudentId = localStorage.getItem('careervoice_student_id');
+    const storedPhone = localStorage.getItem('careervoice_phone') || '';
+
+    if (storedAuditId && storedStudentId) {
+      setIsRestoring(true);
+      setIdentity({
+        studentId: storedStudentId,
+        phone: storedPhone,
+        countryCode: '+91',
+        isOtpVerified: true,
+        anonymousId: guestSessionId.current,
+        sessionId: guestSessionId.current,
+      });
+      setAuditId(storedAuditId);
+
+      getAuditSession(storedAuditId)
+        .then(async (session) => {
+          if (session.targetRole) {
+            setTargetRole({
+              id: session.targetRole.id,
+              title: session.targetRole.title,
+              category: session.targetRole.category || '',
+              description: session.targetRole.description || '',
+              demandLevel: (session.targetRole.demandLevel as any) || 'High',
+              keySkills: session.targetRole.keySkills || [],
+            });
+          }
+
+          if (session.status === 'completed' || session.status === 'finalized') {
+            const report = await getAuditReport(storedAuditId);
+            setAuditResult({
+              auditId: report.auditId || storedAuditId,
+              targetRoleId: report.targetRoleId || session.targetRoleId || 'default_role',
+              targetRole: report.targetRole || session.targetRole?.title || 'Career Specialist',
+              overallScore: report.overallScore,
+              readinessStatus: report.readinessStatus,
+              hiringBenchmark: report.hiringBenchmark,
+              distanceFromBenchmark: report.distanceFromBenchmark,
+              dimensionScores: report.dimensionScores,
+              diagnosisSummary: report.diagnosisSummary,
+              whyRoleFits: report.whyRoleFits,
+              strengths: report.strengths,
+              gaps: (report.gaps || []).map((g) => toCareerGap(g as unknown as ApiGap)),
+              evidenceLedger: report.evidenceLedger,
+              priorityRecommendations: report.priorityRecommendations,
+              diagnosticConclusions: report.diagnosticConclusions,
+              roadmap: [],
+              recommendedPathwissePlan: {
+                planName: 'Pathwisse Pro',
+                highlight: 'Resolve verified gaps with industry mentors.',
+                features: ['1-on-1 Code Reviews', 'Placement Drives'],
+              },
+            });
+            setCurrentStep('READINESS_REPORT');
+          } else {
+            if (session.messages && session.messages.length > 0) {
+              setRestoredMessages(
+                session.messages.map((m) => ({
+                  id: m.id,
+                  sender: m.sender as 'qalam' | 'user',
+                  text: m.text,
+                  timestamp: m.timestamp,
+                }))
+              );
+            }
+            setCurrentStep('CAREER_READINESS_AUDIT');
+          }
+        })
+        .catch((err) => {
+          console.warn('Session restore error:', err);
+          localStorage.removeItem('careervoice_active_audit_id');
+        })
+        .finally(() => {
+          setIsRestoring(false);
+        });
+    }
+  }, []);
+
+  const handleSaveProfile = async (careerIntent: string, targetRoleId?: string) => {
+    if (!identity?.studentId) throw new Error('Verified student identity is required.');
+    await syncProfile({
+      studentId: identity.studentId,
+      firstName,
+      collegeName,
+      branch: departmentName,
+      gradYear: academicYear,
+      careerIntent,
+      targetRoleId,
+    });
+  };
+
+  const handleStartAuditSession = async (confirmedRole: CareerRoleTarget) => {
+    setFlowError(null);
+    if (!identity?.studentId) {
+      setFlowError('Student identity could not be verified.');
+      return;
+    }
+
+    try {
+      const session = await createAuditSession({
+        studentId: identity.studentId,
+        targetRoleId: confirmedRole.id,
+        idempotencyKey: `audit_${identity.studentId}_${confirmedRole.id}`,
+        context: {
+          firstName,
+          collegeName,
+          collegeId,
+          branch: departmentName,
+          academicYear,
+          careerIntent: userRawIntent,
+        },
+      });
+
+      setAuditId(session.auditId);
+      localStorage.setItem('careervoice_active_audit_id', session.auditId);
+      localStorage.setItem('careervoice_student_id', identity.studentId);
+      if (identity.phone) localStorage.setItem('careervoice_phone', identity.phone);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('auditId', session.auditId);
+      window.history.replaceState({}, '', url.toString());
+
+      await handleSaveProfile(userRawIntent, confirmedRole.id);
+      setCurrentStep('CAREER_READINESS_AUDIT');
+    } catch (error) {
+      setFlowError(error instanceof Error ? error.message : 'Audit session could not be created.');
+    }
+  };
+
+  const persistEvidencePayload = async (activeAuditId: string, currentEvidence: EvidenceUploads) => {
+    const uploads: Array<{ key: string; type: string; text: string; source: 'resume' | 'project' | 'github' | 'document' }> = [];
+    if (currentEvidence.resumeText && !persistedEvidenceKeys.resume) {
+      uploads.push({ key: 'resume', type: 'resume_text', text: currentEvidence.resumeText, source: 'resume' });
+    }
+    if (currentEvidence.gitHubUrl && !persistedEvidenceKeys.github) {
+      uploads.push({ key: 'github', type: 'github_profile', text: currentEvidence.gitHubUrl, source: 'github' });
+    }
+    if (currentEvidence.linkedInUrl && !persistedEvidenceKeys.linkedin) {
+      uploads.push({ key: 'linkedin', type: 'linkedin_profile', text: currentEvidence.linkedInUrl, source: 'document' });
+    }
+    if (currentEvidence.portfolioUrl && !persistedEvidenceKeys.portfolio) {
+      uploads.push({ key: 'portfolio', type: 'portfolio_url', text: currentEvidence.portfolioUrl, source: 'project' });
+    }
+    if (currentEvidence.internshipDetails && !persistedEvidenceKeys.internship) {
+      uploads.push({ key: 'internship', type: 'internship_summary', text: currentEvidence.internshipDetails, source: 'document' });
+    }
+
+    if (uploads.length === 0) return;
+
+    for (const item of uploads) {
+      await uploadTextEvidence({
+        auditId: activeAuditId,
+        evidenceType: item.type,
+        rawText: item.text,
+        source: item.source,
+      });
+    }
+
+    setPersistedEvidenceKeys((prev) => {
+      const next = { ...prev };
+      uploads.forEach((u) => { next[u.key] = true; });
+      return next;
+    });
+  };
+
+  const handleGenerateResults = async (evidencePayload: EvidenceUploads = evidence) => {
+    if (!auditId) {
+      setEvaluationError('Active audit session was not found.');
+      return;
+    }
+
     setCurrentStep('PROCESSING');
     setIsEvaluating(true);
     setEvaluationError(null);
 
-    const studentCtx: StudentContext = {
-      degree: 'B.Tech / B.E.',
-      year: academicYear,
-      collegeName,
-      branch: departmentName,
-    };
-    const evidenceForEvaluation = evidenceOverride || evidence;
-
     try {
-      const res = await fetch('/api/qalam/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentContext: studentCtx,
-          targetRole: targetRole.title,
-          targetRoleId: targetRole.id,
-          conversationHistory: interviewMessages,
-          communicationSample,
-          evidenceData: evidenceForEvaluation,
-          phone: identity?.phone || '',
-        }),
-      });
-
-      const data: EvaluationResponse = await res.json();
-
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || 'Evaluation engine failed to score audit answers.');
-      }
-
-      if (Array.isArray(data.toolCalls) && data.toolCalls.length > 0) {
-        handleToolCalls(data.toolCalls as QalamToolCall[]);
-      }
-
-      const benchmarkCall = data.toolCalls?.find((call) => call.name === 'show_competency_benchmark');
-      const hiringBenchmark = benchmarkCall?.args.competencies[0]?.benchmark;
-      if (typeof data.auditId !== 'string' || typeof data.overallScore !== 'number' || !data.dimensionScores
-        || typeof data.diagnosisSummary !== 'string' || !Array.isArray(data.gaps)
-        || !Array.isArray(data.diagnosticConclusions) || typeof hiringBenchmark !== 'number') {
-        throw new Error('Evaluation response is missing required evidence-backed audit fields.');
-      }
+      await persistEvidencePayload(auditId, evidencePayload);
+      const data = await finalizeAudit(auditId);
 
       const fullResult: CareerAuditResult = {
-        auditId: data.auditId,
-        targetRoleId: targetRole.id,
-        targetRole: targetRole.title,
+        auditId: data.auditId || auditId,
+        targetRoleId: data.targetRoleId || targetRole?.id || '',
+        targetRole: data.targetRole || targetRole?.title || 'Career Specialist',
         overallScore: data.overallScore,
-        readinessStatus: readinessStatusForScore(data.overallScore),
-        hiringBenchmark,
-        distanceFromBenchmark: Math.max(hiringBenchmark - data.overallScore, 0),
+        readinessStatus: data.readinessStatus,
+        hiringBenchmark: data.hiringBenchmark,
+        distanceFromBenchmark: data.distanceFromBenchmark,
         dimensionScores: data.dimensionScores,
         diagnosisSummary: data.diagnosisSummary,
-        whyRoleFits: data.whyRoleFits
-          ?? (selectedRoleForExploration?.fitReason ? [selectedRoleForExploration.fitReason] : []),
-        strengths: data.strengths ?? [],
-        gaps: data.gaps,
-        evidenceLedger: data.evidenceLedger ?? [],
-        priorityRecommendations: data.priorityRecommendations ?? [],
-        diagnosticConclusions: data.diagnosticConclusions,
-        roadmap: data.roadmap,
-        recommendedPathwissePlan: data.recommendedPathwissePlan,
-        auditTimestamp: data.auditTimestamp,
-        auditIteration: data.auditIteration,
+        whyRoleFits: data.whyRoleFits || [],
+        strengths: data.strengths || [],
+        gaps: (data.gaps || []).map((gap) => toCareerGap(gap as unknown as ApiGap)),
+        evidenceLedger: data.evidenceLedger || [],
+        priorityRecommendations: data.priorityRecommendations || [],
+        diagnosticConclusions: data.diagnosticConclusions || [],
+        roadmap: [],
+        recommendedPathwissePlan: {
+          planName: 'Pathwisse Pro',
+          highlight: 'Fast-track your gap resolution with live mentor code reviews.',
+          features: ['Targeted Skill Stages', '1-on-1 Code Reviews', 'Guaranteed Placement Drives'],
+        },
       };
 
       setAuditResult(fullResult);
+      setCurrentStep('READINESS_REPORT');
+      trackEvent('career_audit_completed', {
+        auditId,
+        score: fullResult.overallScore,
+        readinessStatus: fullResult.readinessStatus,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Career audit evaluation failed.';
+      setEvaluationError(message);
+      trackEvent('career_audit_evaluation_failed', { auditId, error: message });
+    } finally {
       setIsEvaluating(false);
-
-      // Sync Audit Record to Supabase BaaS
-      fetch('/api/supabase/audit/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: identity?.phone || 'anonymous',
-          targetRole: targetRole.title,
-          auditResult: fullResult,
-          evidenceData: evidenceForEvaluation,
-        }),
-      }).catch((e) => console.warn('Supabase audit sync notice:', e));
-
-    } catch (err: any) {
-      console.error('Failed to generate results:', err);
-      setIsEvaluating(false);
-      setEvaluationError(err.message || 'Audit evaluation failed. Please retry.');
     }
   };
 
   const handleRestartAudit = () => {
+    localStorage.removeItem('careervoice_active_audit_id');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('auditId');
+    window.history.replaceState({}, '', url.toString());
+
     setCurrentStep('WELCOME');
     setIdentity(null);
+    setAuditId(null);
     setFirstName('');
-    setInterviewMessages([]);
+    setCollegeName('');
+    setCollegeId('');
+    setUserRawIntent('');
+    setSelectedRoleForExploration(null);
+    setTargetRole(null);
+    setRestoredMessages([]);
     setEvidence({});
+    setPersistedEvidenceKeys({});
     setAuditResult(null);
+    setEvaluationError(null);
+    setFlowError(null);
     setAdaptiveToolCalls([]);
   };
 
+  if (isRestoring) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] text-[#0b111e] flex flex-col items-center justify-center font-sans">
+        <div className="p-8 rounded-3xl bg-white border border-slate-200 shadow-sm flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-[#1f3861]" />
+          <p className="text-sm font-bold text-[#0b111e]">Resuming your CareerVoice session…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-[#0b111e] flex flex-col font-sans selection:bg-[#1f3861] selection:text-white">
-      {/* Mobile-first Product Frame Container */}
-      <main className="flex-1 flex items-center justify-center p-2 sm:p-4 my-auto">
-        <div className="w-full max-w-[390px] min-h-[780px] border border-[#e1e7ef] rounded-[28px] bg-white shadow-xl shadow-slate-200/50 overflow-hidden relative flex flex-col justify-between">
+    <PathwisseFrame
+      title={frameCopy.title}
+      subtitle={frameCopy.subtitle}
+      activeStep={activeJourneyStep}
+      studentName={firstName}
+      onRestart={handleRestartAudit}
+      auditLabel={auditId ? 'Audit in progress' : null}
+      flowError={flowError || evaluationError}
+    >
           {currentStep === 'WELCOME' && (
             <LandingView
               onStart={() => setCurrentStep('PHONE_OTP')}
@@ -256,8 +494,9 @@ export function App() {
             <PhoneOtpStep
               onVerified={(ident) => {
                 setIdentity(ident);
+                localStorage.setItem('careervoice_student_id', ident.studentId);
+                localStorage.setItem('careervoice_phone', ident.phone);
                 setCurrentStep('ASK_NAME');
-
               }}
               trackEvent={trackEvent}
             />
@@ -302,35 +541,24 @@ export function App() {
               firstName={firstName}
               onComplete={(aYear) => {
                 setAcademicYear(aYear);
-                setCurrentStep('CAREER_INTENT');
+                setCurrentStep('CAREER_DISCOVERY');
               }}
               trackEvent={trackEvent}
             />
           )}
 
-          {currentStep === 'CAREER_INTENT' && (
-            <CareerIntentStep
+          {currentStep === 'CAREER_DISCOVERY' && (
+            <CareerDiscoveryStep
+              studentId={identity?.studentId}
               firstName={firstName}
               departmentName={departmentName}
               careerStreamId={careerStreamId}
+              academicYear={academicYear}
               onIntentProcessed={(intentData) => {
                 setUserRawIntent(intentData.userRawIntent);
+                setKnownSkills(intentData.knownSkills || []);
+                setDiscoveryProfile(intentData.discoveryProfile || {});
                 setCurrentStep('ROLE_DISCOVERY');
-
-                // Sync Student Profile to Supabase BaaS
-                fetch('/api/supabase/profile/sync', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    phone: identity?.phone || 'anonymous',
-                    firstName: firstName,
-                    collegeTier: 'Tier-2/3',
-                    collegeName: collegeName,
-                    branch: departmentName,
-                    gradYear: academicYear,
-                    careerIntent: intentData.userRawIntent,
-                  }),
-                }).catch((e) => console.warn('Supabase profile sync notice:', e));
               }}
               trackEvent={trackEvent}
             />
@@ -340,7 +568,12 @@ export function App() {
             <RoleDiscoveryStep
               firstName={firstName}
               careerStreamId={careerStreamId}
+              departmentName={departmentName}
               userRawIntent={userRawIntent}
+              studentId={identity?.studentId}
+              academicYear={academicYear}
+              knownSkills={knownSkills}
+              discoveryProfile={discoveryProfile}
               onSelectRoleForExplanation={(role) => {
                 setSelectedRoleForExploration(role);
                 setCurrentStep('ROLE_EXPLANATION');
@@ -353,7 +586,7 @@ export function App() {
             <RoleExplanationStep
               role={selectedRoleForExploration}
               firstName={firstName}
-              allRoles={CONSUMER_CAREER_ROLES.slice(0, 5)}
+              departmentName={departmentName}
               onConfirmTargetRole={(confirmedRole) => {
                 const target: CareerRoleTarget = {
                   id: confirmedRole.id,
@@ -366,25 +599,28 @@ export function App() {
                 setTargetRole(target);
                 setCurrentStep('LOAD_COMPETENCY_MODEL');
               }}
-              onSelectDifferentRole={(newRole) => {
-                setSelectedRoleForExploration(newRole);
-              }}
               onExploreAnotherRole={() => setCurrentStep('ROLE_DISCOVERY')}
+              onSelectDifferentRole={(newRole) => setSelectedRoleForExploration(newRole)}
               trackEvent={trackEvent}
             />
           )}
 
-          {currentStep === 'LOAD_COMPETENCY_MODEL' && (
+          {currentStep === 'LOAD_COMPETENCY_MODEL' && targetRole && (
             <LoadCompetencyModelStep
               role={targetRole}
               firstName={firstName}
-              onProceedToAudit={() => setCurrentStep('CAREER_READINESS_AUDIT')}
+              onProceedToAudit={() => {
+                handleStartAuditSession(targetRole);
+              }}
               trackEvent={trackEvent}
             />
           )}
 
-          {currentStep === 'CAREER_READINESS_AUDIT' && (
+          {currentStep === 'CAREER_READINESS_AUDIT' && targetRole && auditId && identity && (
             <AdaptiveInterviewStep
+              auditId={auditId}
+              studentId={identity.studentId}
+              phone={identity.phone}
               role={targetRole}
               studentContext={{
                 degree: 'B.Tech / B.E.',
@@ -393,27 +629,20 @@ export function App() {
                 branch: departmentName,
               }}
               firstName={firstName}
-              onToolCalls={handleToolCalls}
-              onInterviewFinished={(data) => {
-                setInterviewMessages(data.messages);
-                setSkillsExtracted(data.skillsExtracted);
-                setCommunicationSample(data.communicationSample);
+              initialMessages={restoredMessages}
+              onInterviewFinished={(_data) => {
                 setCurrentStep('EVIDENCE_UPLOAD');
               }}
+              onToolCalls={handleToolCalls}
               trackEvent={trackEvent}
             />
           )}
 
           {currentStep === 'EVIDENCE_UPLOAD' && (
             <EvidenceUploadStep
-              onComplete={(ev) => {
-                const evidenceWithAdaptiveProof: EvidenceUploads = {
-                  ...evidence,
-                  ...ev,
-                  adaptiveEvidence: evidence.adaptiveEvidence,
-                };
-                setEvidence(evidenceWithAdaptiveProof);
-                handleGenerateResults(evidenceWithAdaptiveProof);
+              onComplete={(uploadedEvidence) => {
+                setEvidence(uploadedEvidence);
+                handleGenerateResults(uploadedEvidence);
               }}
               trackEvent={trackEvent}
             />
@@ -421,15 +650,17 @@ export function App() {
 
           {currentStep === 'PROCESSING' && (
             <ProcessingSequenceStep
-              isEvaluating={isEvaluating}
-              error={evaluationError}
-              onRetry={() => handleGenerateResults()}
-              onFinished={() => setCurrentStep('READINESS_REPORT')}
+              onFinished={() => {
+                if (auditResult) setCurrentStep('READINESS_REPORT');
+              }}
               trackEvent={trackEvent}
+              error={evaluationError}
+              isEvaluating={isEvaluating}
+              onRetry={() => handleGenerateResults(evidence)}
             />
           )}
 
-          {currentStep === 'READINESS_REPORT' && auditResult && (
+          {currentStep === 'READINESS_REPORT' && auditResult && targetRole && (
             <ReadinessReportView
               result={auditResult}
               role={targetRole}
@@ -438,7 +669,7 @@ export function App() {
             />
           )}
 
-          {currentStep === 'GAP_REPORT' && auditResult && (
+          {currentStep === 'GAP_REPORT' && auditResult && targetRole && (
             <GapReportView
               gaps={auditResult.gaps}
               role={targetRole}
@@ -447,13 +678,31 @@ export function App() {
             />
           )}
 
-          {currentStep === 'ROADMAP' && auditResult && (
+          {currentStep === 'ROADMAP' && targetRole && auditId && identity && (
             <RoadmapView
-              roadmap={auditResult.roadmap}
+              handoff={{
+                contract: 'career-audit-roadmap-contract:v1',
+                auditId,
+                studentId: identity.studentId,
+                targetRoleId: targetRole.id,
+                readinessScore: auditResult?.overallScore || 0,
+                priorityGaps: (auditResult?.gaps || []).map((g) => ({
+                  gapId: g.id,
+                  skillId: g.skillId || g.id,
+                  skillName: g.title,
+                  expectedScore: g.expectedScore ?? 70,
+                  demonstratedScore: g.demonstratedScore ?? 50,
+                  gapScore: g.gap ?? 20,
+                  priority: g.priority || 'High',
+                  mappingStatus: g.mappingStatus || 'UNMAPPED',
+                  recommendedPathwisseSkillId: g.recommendedPathwisseSkillId,
+                  recommendedStageIds: g.recommendedStageIds || [],
+                  evidenceIds: g.evidenceIds || [],
+                })),
+              }}
               role={targetRole}
               onOpenShare={() => setIsShareOpen(true)}
               onOpenUpgrade={() => setIsUpgradeOpen(true)}
-              onOpenReAudit={() => setIsReAuditOpen(true)}
               trackEvent={trackEvent}
             />
           )}
@@ -465,33 +714,17 @@ export function App() {
               setAdaptiveToolCalls((calls) => calls.filter((call) => call.id !== callId));
             }}
           />
-        </div>
-      </main>
+      <div className="sr-only" aria-live="polite">{currentStep}</div>
 
-      {/* Share, Upgrade, & Re-Audit Modals */}
-      {auditResult && (
-        <>
-          <ShareCardModal
-            isOpen={isShareOpen}
-            onClose={() => setIsShareOpen(false)}
-            result={auditResult}
-            role={targetRole}
-            trackEvent={trackEvent}
-          />
-
-          <ReAuditModal
-            isOpen={isReAuditOpen}
-            onClose={() => setIsReAuditOpen(false)}
-            role={targetRole}
-            roadmap={auditResult.roadmap}
-            previousResult={auditResult}
-            onReAuditComplete={(updatedRes) => {
-              setAuditResult(updatedRes);
-              setCurrentStep('READINESS_REPORT');
-            }}
-            trackEvent={trackEvent}
-          />
-        </>
+      {/* Modals */}
+      {auditResult && targetRole && (
+        <ShareCardModal
+          isOpen={isShareOpen}
+          onClose={() => setIsShareOpen(false)}
+          result={auditResult}
+          role={targetRole}
+          trackEvent={trackEvent}
+        />
       )}
 
       <UpgradeModal
@@ -499,12 +732,15 @@ export function App() {
         onClose={() => setIsUpgradeOpen(false)}
         trackEvent={trackEvent}
       />
+    </PathwisseFrame>
+  );
+}
 
-      <SupabaseConfigModal
-        isOpen={isSupabaseOpen}
-        onClose={() => setIsSupabaseOpen(false)}
-      />
-    </div>
+export function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MainApp />
+    </QueryClientProvider>
   );
 }
 

@@ -23,7 +23,7 @@ export const GapReportView: React.FC<GapReportViewProps> = ({ gaps, role, onNext
 
   return (
     <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-5 max-w-sm mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
-      <QalamCharacter state="CURIOUS" subtitles={`These are your ${role.title} gaps ranked by benchmark distance multiplied by dependency, importance, and employability weights.`} />
+      <QalamCharacter state="CURIOUS" subtitles={`These are the ${role.title} skills to improve first, ranked by how much they affect your readiness.`} />
 
       <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -51,7 +51,7 @@ export const GapReportView: React.FC<GapReportViewProps> = ({ gaps, role, onNext
 
                 <div className="pt-2 border-t border-slate-200/60 space-y-1.5 text-[11px]">
                   <div className="flex items-start gap-1.5"><Sparkles className="w-3 h-3 text-[#1f3861] shrink-0 mt-0.5" /><span><strong>Action:</strong> {gap.recommendedAction}</span></div>
-                  {gap.mappingStatus === 'UNMAPPED' && <div className="flex items-start gap-1.5 text-amber-800"><Link2Off className="w-3 h-3 shrink-0 mt-0.5" /><span>Pathwisse mapping is not configured. No stage will be invented.</span></div>}
+                  {gap.mappingStatus === 'UNMAPPED' && <div className="flex items-start gap-1.5 text-amber-800"><Link2Off className="w-3 h-3 shrink-0 mt-0.5" /><span>A guided lesson is not ready for this gap yet. Use the action above for now.</span></div>}
                 </div>
               </div>
             );

@@ -370,7 +370,7 @@ export const QalamCharacter: React.FC<QalamCharacterProps> = ({
             ? 'I hear you...'
             : state === 'CELEBRATING'
             ? 'Audit Complete!'
-            : 'Qalam AI Career Auditor'}
+            : 'Qalam Career Guide'}
         </span>
 
         {onSpeak && (

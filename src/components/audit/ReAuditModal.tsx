@@ -134,9 +134,9 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">
-                Progress Verification
+                Progress check
               </span>
-              <h3 className="text-sm font-bold text-[#0b111e]">Re-Audit Readiness Index</h3>
+              <h3 className="text-sm font-bold text-[#0b111e]">Update your readiness score</h3>
             </div>
           </div>
 
@@ -149,13 +149,13 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
         </div>
 
         <p className="text-xs text-slate-600 leading-relaxed font-medium">
-          Have you finished any roadmap milestones or deployed new code? Submit your progress below to recalculate your verified score.
+          Finished any roadmap milestones or created new proof of work? Add it here to refresh your readiness score.
         </p>
 
         {/* Roadmap Milestones Checkbox List */}
         <div className="space-y-2">
           <span className="text-[11px] font-bold text-[#1f3861] uppercase tracking-wider block">
-            Select Completed Milestones:
+            Select completed milestones:
           </span>
           <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
             {roadmap.flatMap((w) => w.topics).map((topic, i) => {
@@ -190,7 +190,7 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
           <div>
             <label className="text-[11px] font-medium text-[#344256] flex items-center gap-1.5 mb-1">
               <Link className="w-3.5 h-3.5 text-blue-600" />
-              New Deployed URL / GitHub Commit URL (Optional)
+              New project or proof link (optional)
             </label>
             <input
               type="url"
@@ -210,7 +210,7 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
               type="text"
               value={newEvidenceNote}
               onChange={(e) => setNewEvidenceNote(e.target.value)}
-              placeholder="e.g. Deployed FastAPI model container, integrated PostgreSQL..."
+              placeholder="e.g. completed an HVAC load calculation, built a prototype, published a portfolio project..."
               className="w-full bg-[#f8fafc] border border-[#e1e7ef] rounded-xl px-3 py-2 text-xs text-[#0b111e] focus:outline-none focus:border-[#1f3861]"
             />
           </div>
@@ -226,12 +226,12 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Auditing Progress Signals...</span>
+                <span>Checking your progress...</span>
               </>
             ) : (
               <>
                 <TrendingUp className="w-4 h-4 text-emerald-400" />
-                <span>Recalculate Career Readiness Score</span>
+                <span>Refresh my readiness score</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}

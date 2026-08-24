@@ -75,12 +75,12 @@ export const ProcessingSequenceStep: React.FC<ProcessingSequenceStepProps> = ({
         }
       />
 
-      {/* Error state if AI evaluation failed */}
+      {/* Error state if evaluation failed */}
       {error ? (
         <div className="w-full bg-red-50 border border-red-200 rounded-2xl p-5 my-4 text-left space-y-4 shadow-sm">
           <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
             <AlertTriangle className="w-4 h-4 text-red-600" />
-            <span>Audit Evaluation Encountered an Issue</span>
+            <span>We could not finish your report</span>
           </div>
 
           <p className="text-xs text-red-700 leading-relaxed font-medium">
@@ -149,7 +149,7 @@ export const ProcessingSequenceStep: React.FC<ProcessingSequenceStepProps> = ({
       )}
 
       <p className="text-[10px] text-slate-500">
-        Pathwisse Knowledge Graph & Supabase benchmarks live
+        Your report is built from your answers and selected role benchmark.
       </p>
     </div>
   );

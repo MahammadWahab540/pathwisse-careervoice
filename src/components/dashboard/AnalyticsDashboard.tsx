@@ -26,7 +26,7 @@ export const AnalyticsDashboard: React.FC = () => {
   if (loading || !stats) {
     return (
       <div className="p-8 text-center text-slate-400 text-xs">
-        Loading real-time product analytics dashboard...
+        Loading product insights...
       </div>
     );
   }
@@ -51,7 +51,7 @@ export const AnalyticsDashboard: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#e1e7ef] border border-[#1f3861]/20 text-[11px] font-bold text-[#1f3861] mb-1">
             <BarChart2 className="w-3.5 h-3.5 text-[#1f3861]" />
-            PostHog & Supabase Analytics Instrumentation
+            Product usage overview
           </div>
           <h1 className="text-xl font-bold text-[#0b111e]">Pathwisse Product Analytics</h1>
         </div>
@@ -126,7 +126,7 @@ export const AnalyticsDashboard: React.FC = () => {
       {/* Raw Event Inspector */}
       <div className="p-5 rounded-2xl bg-white border border-[#e1e7ef] shadow-sm space-y-3">
         <h3 className="text-xs font-bold text-[#0b111e] uppercase tracking-wider">
-          Live Event Log Stream (PostHog Schema)
+          Recent activity
         </h3>
 
         <div className="max-h-64 overflow-y-auto space-y-2 pr-2 font-mono text-[11px]">

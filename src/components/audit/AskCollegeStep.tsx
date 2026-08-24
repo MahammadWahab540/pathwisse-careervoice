@@ -10,7 +10,13 @@ interface AskCollegeStepProps {
   onBack?: () => void;
 }
 
-const POPULAR_COLLEGES = [
+interface CollegeOption {
+  id: string;
+  name: string;
+  tier?: string;
+}
+
+const FALLBACK_COLLEGES: CollegeOption[] = [
   { id: 'vit_v', name: 'VIT Vellore', tier: 'Tier-1 Deemed' },
   { id: 'iit_b', name: 'IIT Bombay', tier: 'Institute of National Importance' },
   { id: 'iit_d', name: 'IIT Delhi', tier: 'Institute of National Importance' },
@@ -25,8 +31,13 @@ const POPULAR_COLLEGES = [
   { id: 'pes_b', name: 'PES University, Bengaluru', tier: 'Major University' },
   { id: 'rvce_b', name: 'RV College of Engineering, Bengaluru', tier: 'Autonomous Tier-1' },
   { id: 'msrit_b', name: 'Ramaiah Institute of Technology, Bengaluru', tier: 'Autonomous Tier-1' },
-  { id: 'other_c', name: "Other College / Institute (Type your college)", tier: 'Custom' },
 ];
+
+const OTHER_COLLEGE: CollegeOption = {
+  id: 'other_c',
+  name: 'Other College / Institute (Type your college)',
+  tier: 'Custom',
+};
 
 export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
   firstName,
@@ -34,7 +45,9 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
   trackEvent,
 }) => {
   const [search, setSearch] = useState('');
+  const [colleges, setColleges] = useState<CollegeOption[]>(FALLBACK_COLLEGES);
   const [selectedCollege, setSelectedCollege] = useState<string>('');
+  const [selectedCollegeId, setSelectedCollegeId] = useState<string>('');
   const [customCollege, setCustomCollege] = useState('');
   const [isCustom, setIsCustom] = useState(false);
 
@@ -49,17 +62,41 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
     };
   }, [firstName]);
 
-  const filteredColleges = POPULAR_COLLEGES.filter((c) =>
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch('/api/colleges')
+      .then((res) => {
+        if (!res.ok) throw new Error('Unable to load colleges');
+        return res.json();
+      })
+      .then((payload) => {
+        if (!isMounted || !Array.isArray(payload.colleges)) return;
+        setColleges(payload.colleges.length > 0 ? payload.colleges : FALLBACK_COLLEGES);
+      })
+      .catch((err) => {
+        console.warn('College catalog fallback in use:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const filteredColleges = colleges.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase())
   );
+  const visibleColleges = [...filteredColleges, OTHER_COLLEGE];
 
   const handleSelect = (colName: string, colId: string) => {
     if (colId === 'other_c') {
       setIsCustom(true);
       setSelectedCollege('Other College / Institute');
+      setSelectedCollegeId('other_c');
     } else {
       setIsCustom(false);
       setSelectedCollege(colName);
+      setSelectedCollegeId(colId);
       setCustomCollege(colName);
     }
   };
@@ -68,7 +105,9 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
     const finalCollegeName = isCustom
       ? customCollege.trim() || 'Autonomous Engineering Institute'
       : selectedCollege || customCollege.trim() || 'Autonomous Engineering Institute';
-    const finalId = `col_${finalCollegeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    const finalId = isCustom
+      ? `col_${finalCollegeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
+      : selectedCollegeId || `col_${finalCollegeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
     trackEvent('college_selected', { collegeName: finalCollegeName, collegeId: finalId });
     onComplete(finalCollegeName, finalId);
   };
@@ -103,7 +142,7 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
 
         {/* Scrollable list */}
         <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
-          {filteredColleges.map((col) => {
+          {visibleColleges.map((col) => {
             const isSelected = selectedCollege === col.name || (col.id === 'other_c' && isCustom);
             return (
               <button
@@ -118,7 +157,7 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
               >
                 <div className="min-w-0">
                   <span className="line-clamp-1">{col.name}</span>
-                  {col.tier !== 'Custom' && (
+                  {col.tier && col.tier !== 'Custom' && (
                     <span className="text-[10px] text-slate-500 font-medium block mt-0.5">{col.tier}</span>
                   )}
                 </div>

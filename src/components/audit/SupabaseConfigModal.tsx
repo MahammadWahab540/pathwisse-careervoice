@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Database, CheckCircle2, AlertCircle, Copy, Check, ExternalLink, X, Shield } from 'lucide-react';
+import { Settings, CheckCircle2, AlertCircle, Copy, Check, ExternalLink, X } from 'lucide-react';
 
 interface SupabaseConfigModalProps {
   isOpen: boolean;
@@ -49,13 +49,13 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-              <Database className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
             </div>
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 font-bold">
-                Backend-as-a-Service
+                Admin setup
               </span>
-              <h3 className="text-sm font-bold text-[#0b111e]">Supabase Database & Auth</h3>
+              <h3 className="text-sm font-bold text-[#0b111e]">Workspace connection</h3>
             </div>
           </div>
 
@@ -71,33 +71,37 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
         <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#0b111e] flex items-center gap-1.5">
-              Connection Status
+              Connection status
             </span>
             {isLoading ? (
               <span className="text-[10px] text-slate-500 font-mono">Checking connection...</span>
             ) : status?.connected ? (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Connected & Active
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Ready
               </span>
             ) : status?.configured ? (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3 text-amber-600" /> Credentials Present, Schema Pending
+                <AlertCircle className="w-3 h-3 text-amber-600" /> Setup needs one more step
               </span>
             ) : (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                Awaiting Configuration
+                Setup required
               </span>
             )}
           </div>
           <p className="text-xs text-slate-600 font-medium">
-            {status?.message || 'Connecting to Supabase...'}
+            {status?.connected
+              ? 'Your workspace is ready.'
+              : status?.configured
+              ? 'Your workspace details are saved. Finish the setup steps below.'
+              : 'Add the workspace details to finish setup.'}
           </p>
         </div>
 
         {/* Setup Instructions */}
         <div className="space-y-2 text-xs text-slate-600 font-medium leading-relaxed">
           <h4 className="font-bold text-[#0b111e] uppercase tracking-wider text-[11px]">
-            Supabase Connection Steps:
+            Workspace setup steps:
           </h4>
           <ol className="list-decimal pl-4 space-y-1.5">
             <li>
@@ -108,7 +112,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
                 rel="noreferrer"
                 className="text-[#1f3861] font-bold underline inline-flex items-center gap-0.5"
               >
-                Supabase Dashboard <ExternalLink className="w-2.5 h-2.5" />
+                project dashboard <ExternalLink className="w-2.5 h-2.5" />
               </a>{' '}
               and copy your <strong>Project URL</strong> and <strong>anon key</strong>.
             </li>
@@ -120,7 +124,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
               </ul>
             </li>
             <li>
-              Run the SQL schema below in your <strong>Supabase SQL Editor</strong> to create the tables.
+              Run the setup script below in your project editor to create the required tables.
             </li>
           </ol>
         </div>
@@ -129,7 +133,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
-              SQL Schema for Supabase Editor
+              Workspace setup script
             </span>
             <button
               onClick={copySchema}
@@ -141,13 +145,13 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
                 </>
               ) : (
                 <>
-                  <Copy className="w-3 h-3" /> Copy SQL
+                  <Copy className="w-3 h-3" /> Copy setup script
                 </>
               )}
             </button>
           </div>
           <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] font-mono overflow-x-auto max-h-40 border border-slate-800">
-            {status?.schemaSql || '-- Loading schema...'}
+            {status?.schemaSql || '-- Loading setup script...'}
           </pre>
         </div>
 

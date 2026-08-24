@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
 import { useRoleCompetencies } from '../../hooks/useCareerRoles';
@@ -17,11 +17,14 @@ import {
   Cpu,
   Layers,
   HelpCircle,
+  MessageSquareQuote,
 } from 'lucide-react';
+import { CareerVoiceConsultant } from './CareerVoiceConsultant';
 
 interface RoleExplanationStepProps {
   role: CareerRoleDto;
   firstName: string;
+  departmentName?: string;
   allRecommendedRoles?: RoleRecommendationDto[];
   onConfirmTargetRole: (confirmedRole: CareerRoleDto) => void;
   onExploreAnotherRole: () => void;
@@ -33,6 +36,7 @@ interface RoleExplanationStepProps {
 export const RoleExplanationStep: React.FC<RoleExplanationStepProps> = ({
   role,
   firstName,
+  departmentName,
   allRecommendedRoles = [],
   onConfirmTargetRole,
   onExploreAnotherRole,
@@ -40,6 +44,7 @@ export const RoleExplanationStep: React.FC<RoleExplanationStepProps> = ({
   trackEvent,
 }) => {
   const [isComparing, setIsComparing] = useState(false);
+  const [isConsultantOpen, setIsConsultantOpen] = useState(false);
   const { data: competencyModel, isLoading: isCompetencyLoading } = useRoleCompetencies(role.id);
 
   const explanationText =
@@ -140,6 +145,18 @@ export const RoleExplanationStep: React.FC<RoleExplanationStepProps> = ({
             <span>Choose This Track & Start Audit</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              setIsConsultantOpen(true);
+              trackEvent('career_voice_consultant_opened', { targetRole: role.title });
+            }}
+            className="w-full py-2.5 px-3 rounded-2xl bg-amber-50 border border-amber-200/80 text-xs font-bold text-amber-900 hover:bg-amber-100 transition cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs"
+          >
+            <MessageSquareQuote className="w-4 h-4 text-amber-600" />
+            <span>Ask Qalam About {role.title}</span>
+          </button>
+
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -174,6 +191,17 @@ export const RoleExplanationStep: React.FC<RoleExplanationStepProps> = ({
             onSelectDifferentRole?.(newRole);
           }}
           onClose={() => setIsComparing(false)}
+          trackEvent={trackEvent}
+        />
+      )}
+
+      {isConsultantOpen && (
+        <CareerVoiceConsultant
+          isOpen={isConsultantOpen}
+          onClose={() => setIsConsultantOpen(false)}
+          targetRoleTitle={role.title}
+          firstName={firstName}
+          departmentName={departmentName}
           trackEvent={trackEvent}
         />
       )}

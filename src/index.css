@@ -12,18 +12,36 @@
     --color-accent-blue: #2563eb;
     --color-success: #10b981;
     --color-error: #ef4444;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   }
 
   html {
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
   }
 
   body {
     background-color: #f8fafc;
     color: #0b111e;
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', sans-serif;
+    font-family: Inter, 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', sans-serif;
     letter-spacing: -0.011em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  button,
+  input,
+  textarea,
+  select,
+  a {
+    outline-color: #3b82f6;
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    background: #1f3861;
+    color: #ffffff;
   }
 }
 
@@ -59,6 +77,25 @@
 
 .careervoice-breathe {
   animation: careervoice-breathe 2.2s ease-in-out infinite;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.text-pretty {
+  text-wrap: pretty;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pw-card-hover {
+    transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out), border-color 180ms var(--ease-out);
+  }
+
+  .pw-card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: rgba(15, 23, 41, 0.14) 0px 22px 34px -18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

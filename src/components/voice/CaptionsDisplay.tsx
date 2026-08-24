@@ -57,7 +57,7 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
         >
           <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider mb-1">
             <Volume2 className="w-3.5 h-3.5 animate-pulse text-[#1f3861]" />
-            Qalam AI
+            Qalam
           </div>
           <p className="text-xs sm:text-sm text-[#0b111e] font-medium leading-relaxed">
             {lastQalamText}

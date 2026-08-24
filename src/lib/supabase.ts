@@ -31,6 +31,14 @@ export function getSupabase(): SupabaseClient | null {
   return supabaseClient;
 }
 
+export function requireSupabase(): SupabaseClient {
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase server configuration is missing.');
+  }
+  return supabase;
+}
+
 export interface SupabaseUserProfile {
   id?: string;
   phone: string;
