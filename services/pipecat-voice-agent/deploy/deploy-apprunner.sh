@@ -152,10 +152,14 @@ HAS_DAILY=0
 if [ -n "$DAILY_ARN" ]; then HAS_DAILY=1; fi
 
 HAS_LIVEKIT=0
-if [ -n "$LIVEKIT_URL_ARN" ] && [ -n "$LIVEKIT_KEY_ARN" ] && [ -n "$LIVEKIT_SECRET_ARN" ]; then HAS_LIVEKIT=1; fi
+if [ -n "$LIVEKIT_URL_ARN" ] && [ -n "$LIVEKIT_KEY_ARN" ] && [ -n "$LIVEKIT_SECRET_ARN" ]; then
+  HAS_LIVEKIT=1
+elif [ -n "$LIVEKIT_URL_ARN" ] || [ -n "$LIVEKIT_KEY_ARN" ] || [ -n "$LIVEKIT_SECRET_ARN" ]; then
+  echo "WARNING: Partial LiveKit configuration detected. LiveKit transport disabled."
+fi
 
 if [ "$HAS_DAILY" -eq 0 ] && [ "$HAS_LIVEKIT" -eq 0 ]; then
-  echo "ERROR: At least one transport (Daily or LiveKit) must have all required secrets configured."
+  echo "ERROR: At least one transport (Daily or fully configured LiveKit) must have all required secrets configured."
   MISSING_REQUIRED=1
 fi
 
@@ -173,7 +177,7 @@ if [ -n "$CARTESIA_ARN" ]; then SECRETS_LIST+=("\"CARTESIA_API_KEY\": \"$CARTESI
 if [ -n "$NOVITA_ARN" ]; then SECRETS_LIST+=("\"NOVITA_API_KEY\": \"$NOVITA_ARN\""); fi
 if [ -n "$GEMINI_ARN" ]; then SECRETS_LIST+=("\"GEMINI_API_KEY\": \"$GEMINI_ARN\""); fi
 if [ -n "$DAILY_ARN" ]; then SECRETS_LIST+=("\"DAILY_API_KEY\": \"$DAILY_ARN\""); fi
-if [ -n "$LIVEKIT_URL_ARN" ]; then
+if [ "$HAS_LIVEKIT" -eq 1 ]; then
   SECRETS_LIST+=("\"LIVEKIT_URL\": \"$LIVEKIT_URL_ARN\"")
   SECRETS_LIST+=("\"LIVEKIT_API_KEY\": \"$LIVEKIT_KEY_ARN\"")
   SECRETS_LIST+=("\"LIVEKIT_API_SECRET\": \"$LIVEKIT_SECRET_ARN\"")
