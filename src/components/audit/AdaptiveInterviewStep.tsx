@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { CaptionsDisplay } from '../voice/CaptionsDisplay';
 import { EvidenceCoverageList } from './EvidenceCoverageList';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
-import { usePipecatVoice } from '../../hooks/usePipecatVoice';
 import { useRoleCompetencies } from '../../hooks/useCareerRoles';
 import { sendQalamChat, submitSkillSignal } from '../../api/audit';
 import type {
@@ -24,7 +23,6 @@ import {
   SkipForward,
   RefreshCw,
   AlertTriangle,
-  Layers,
   Shield,
   ChevronDown,
   ChevronUp,
@@ -79,9 +77,6 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   const [turnError, setTurnError] = useState<string | null>(null);
   const [retryTurn, setRetryTurn] = useState<RetryTurn | null>(null);
   const [showCoverageMap, setShowCoverageMap] = useState(false);
-  const [voiceModeChecked, setVoiceModeChecked] = useState(false);
-  const [pipecatConfigured, setPipecatConfigured] = useState(false);
-  const [pipecatError, setPipecatError] = useState<string | null>(null);
 
   const { data: competencyModel } = useRoleCompetencies(role.id);
 
@@ -142,6 +137,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     };
   });
 
+  const lastQalamMessage = [...messages].reverse().find((m) => m.sender === 'qalam')?.text;
 
   const handleSpeechResult = (text: string) => {
     if (text.trim()) void submitAnswer(text.trim(), 'voice');
@@ -164,94 +160,9 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     speakText,
     stopSpeaking,
   } = useVoiceInteraction({ onSpeechResult: handleSpeechResult, onBargeIn: handleBargeIn });
-
-  const handlePipecatTranscript = useCallback(
-    (text: string, sender: 'user' | 'qalam') => {
-      const cleanText = text.trim();
-      if (!cleanText) return;
-      if (sender === 'user') {
-        void submitAnswer(cleanText, 'voice');
-        return;
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `pipecat_${sender}_${Date.now()}`,
-          sender: 'qalam',
-          text: cleanText,
-          timestamp: Date.now(),
-          qalamState: 'SPEAKING',
-        },
-      ]);
-      setQalamState('SPEAKING');
-    },
-    [auditId]
-  );
-
-  const {
-    isConnected: isPipecatConnected,
-    isConnecting: isPipecatConnecting,
-    isSpeaking: isPipecatSpeaking,
-    isMuted: isPipecatMuted,
-    startSession: startPipecatSession,
-    endSession: endPipecatSession,
-    toggleMute: togglePipecatMute,
-  } = usePipecatVoice({
-    auditId,
-    targetRole: role.title,
-    studentName: firstName || 'Candidate',
-    onTranscript: handlePipecatTranscript,
-    onError: (message) => {
-      setPipecatError(message);
-      trackEvent('pipecat_voice_error', { auditId, message });
-    },
-  });
-
-  const isLiveVoiceActive = isPipecatConnected || isPipecatConnecting;
+  const lastUserMessage = [...messages].reverse().find((m) => m.sender === 'user')?.text || transcript;
 
   useEffect(() => {
-    let ignore = false;
-    fetch('/api/health')
-      .then((res) => res.json())
-      .then((health) => {
-        if (ignore) return;
-        setPipecatConfigured(Boolean(health?.pipecatConfigured));
-        setVoiceModeChecked(true);
-      })
-      .catch(() => {
-        if (ignore) return;
-        setPipecatConfigured(false);
-        setVoiceModeChecked(true);
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!voiceModeChecked || !pipecatConfigured || isPipecatConnected || isPipecatConnecting) return;
-    setPipecatError(null);
-    void startPipecatSession().then((started) => {
-      trackEvent(started ? 'pipecat_voice_session_started' : 'pipecat_voice_session_failed', {
-        auditId,
-        role: role.id,
-      });
-    });
-  }, [
-    auditId,
-    isPipecatConnected,
-    isPipecatConnecting,
-    pipecatConfigured,
-    role.id,
-    startPipecatSession,
-    trackEvent,
-    voiceModeChecked,
-  ]);
-
-  useEffect(() => {
-    if (!voiceModeChecked) return;
     if (messages.length === 0) {
       const initialPrompt = PROBE_STAGES[0].prompt;
       const initialMessage: AuditMessage = {
@@ -263,18 +174,11 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       };
       setMessages([initialMessage]);
       setQalamState('SPEAKING');
-      if (!pipecatConfigured) {
-        speakText(initialPrompt, () => setQalamState('LISTENING'));
-      } else {
-        setQalamState('LISTENING');
-      }
+      speakText(initialPrompt, () => setQalamState('LISTENING'));
       trackEvent('career_audit_started', { auditId, role: role.id });
     }
-    return () => {
-      stopSpeaking();
-      endPipecatSession();
-    };
-  }, [auditId, endPipecatSession, pipecatConfigured, role.id, speakText, stopSpeaking, voiceModeChecked]);
+    return () => stopSpeaking();
+  }, [auditId, role.id]);
 
   async function submitAnswer(
     answerText: string,
@@ -283,7 +187,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   ) {
     if (isAiLoading) return;
     stopListening();
-    if (!isLiveVoiceActive) stopSpeaking();
+    stopSpeaking();
     setTurnError(null);
     setIsAiLoading(true);
     setQalamState('THINKING');
@@ -382,12 +286,8 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
 
       if (data.needsFollowUp) {
         setIsFollowUpActive(true);
-        if (isLiveVoiceActive) {
-          setQalamState('LISTENING');
-        } else {
-          setQalamState('SPEAKING');
-          speakText(data.qalamText, () => setQalamState('LISTENING'));
-        }
+        setQalamState('SPEAKING');
+        speakText(data.qalamText, () => setQalamState('LISTENING'));
         return;
       }
 
@@ -395,12 +295,8 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       if (currentTurn < PROBE_STAGES.length - 1) {
         const nextIndex = currentTurn + 1;
         setCurrentTurn(nextIndex);
-        if (isLiveVoiceActive) {
-          setQalamState('LISTENING');
-        } else {
-          setQalamState('SPEAKING');
-          speakText(data.qalamText, () => setQalamState('LISTENING'));
-        }
+        setQalamState('SPEAKING');
+        speakText(data.qalamText, () => setQalamState('LISTENING'));
       } else {
         setQalamState('CELEBRATING');
         const finishInterview = () => {
@@ -410,8 +306,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
             communicationSample: communicationSample || answerText,
           });
         };
-        if (isLiveVoiceActive) finishInterview();
-        else speakText(data.qalamText, finishInterview);
+        speakText(data.qalamText, finishInterview);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'This audit turn could not be completed.';
@@ -434,9 +329,6 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     trackEvent('voice_question_skipped', { auditId, turn: currentTurn });
     void submitAnswer('I have not built this yet.', 'tap');
   };
-
-  const lastQalamMessage = [...messages].reverse().find((m) => m.sender === 'qalam')?.text;
-  const lastUserMessage = [...messages].reverse().find((m) => m.sender === 'user')?.text || transcript;
 
   return (
     <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-4 max-w-sm mx-auto text-center selection:bg-[#1f3861] selection:text-white">
@@ -481,19 +373,14 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
           state={
             isAiLoading
               ? 'THINKING'
-              : isPipecatSpeaking
-              ? 'SPEAKING'
-              : isPipecatConnected
-              ? 'LISTENING'
               : isSpeaking
               ? 'SPEAKING'
               : isListening
               ? 'LISTENING'
               : qalamState
           }
-          audioAmplitude={isPipecatSpeaking ? 0.65 : amplitude}
+          audioAmplitude={amplitude}
           onSpeak={() => {
-            if (isLiveVoiceActive) return;
             if (lastQalamMessage) speakText(lastQalamMessage, () => setQalamState('LISTENING'));
           }}
         />
@@ -501,10 +388,6 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (isPipecatConnected) {
-                togglePipecatMute();
-                return;
-              }
               if (isSpeaking) {
                 stopSpeaking();
               } else {
@@ -513,34 +396,20 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
             }}
             className="mt-1 flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-700 transition cursor-pointer"
           >
-            {isPipecatConnected ? (
-              isPipecatMuted ? (
-                <MicOff className="w-3.5 h-3.5 text-indigo-600" />
-              ) : (
-                <Mic className="w-3.5 h-3.5 text-indigo-600" />
-              )
-            ) : isSpeaking ? (
+            {isSpeaking ? (
               <VolumeX className="w-3.5 h-3.5 text-indigo-600" />
             ) : (
               <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
             )}
-            <span>
-              {isPipecatConnected
-                ? isPipecatMuted
-                  ? 'Unmute live voice'
-                  : 'Mute live voice'
-                : isSpeaking
-                ? 'Mute audio'
-                : 'Play audio'}
-            </span>
+            <span>{isSpeaking ? 'Mute audio' : 'Play audio'}</span>
           </button>
         )}
       </div>
 
       <VoiceWaveform
-        amplitude={isPipecatSpeaking ? 0.65 : amplitude}
-        isListening={isListening || isPipecatConnected}
-        isSpeaking={isSpeaking || isPipecatSpeaking}
+        amplitude={amplitude}
+        isListening={isListening}
+        isSpeaking={isSpeaking}
       />
 
       <div className="w-full my-2">
@@ -560,48 +429,10 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
           lastQalamText={lastQalamMessage}
           lastUserText={lastUserMessage}
           onEditTranscript={(newText) => void submitAnswer(newText, 'type')}
-          isListening={isListening || isPipecatConnected}
-          isSpeaking={isSpeaking || isPipecatSpeaking}
+          isListening={isListening}
+          isSpeaking={isSpeaking}
         />
       </div>
-
-      {pipecatConfigured && (
-        <div
-          className={`w-full mb-3 rounded-2xl border p-3 text-left ${
-            isPipecatConnected
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-              : pipecatError
-              ? 'border-amber-200 bg-amber-50 text-amber-900'
-              : 'border-blue-200 bg-blue-50 text-[#1f3861]'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold">
-                {isPipecatConnected
-                  ? 'Live voice agent connected'
-                  : isPipecatConnecting
-                  ? 'Opening live voice agent…'
-                  : pipecatError
-                  ? 'Live voice needs attention'
-                  : 'Live voice agent ready'}
-              </p>
-              <p className="mt-0.5 text-[10px] font-medium leading-relaxed opacity-80">
-                {pipecatError || 'Qalam is using the deployed voice service for this audit.'}
-              </p>
-            </div>
-            {isPipecatConnected && (
-              <button
-                type="button"
-                onClick={() => void endPipecatSession()}
-                className="shrink-0 rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-bold text-slate-700 shadow-sm transition hover:bg-white"
-              >
-                End
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {turnError && retryTurn && (
         <div className="w-full mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left space-y-2">
@@ -627,31 +458,16 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
             type="button"
             disabled={isAiLoading || Boolean(turnError)}
             onClick={() => {
-              if (pipecatConfigured) {
-                if (isPipecatConnected) {
-                  togglePipecatMute();
-                } else if (!isPipecatConnecting) {
-                  setPipecatError(null);
-                  void startPipecatSession();
-                }
-                return;
-              }
               if (isListening) stopListening();
               else startListening();
             }}
             className={`p-5 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 flex items-center justify-center cursor-pointer active:scale-95 disabled:opacity-40 ${
-              isPipecatConnected && !isPipecatMuted
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-8 ring-emerald-100'
-                : isPipecatConnected && isPipecatMuted
-                ? 'bg-amber-500 hover:bg-amber-600 text-white ring-8 ring-amber-100'
-                : isListening
+              isListening
                 ? 'bg-rose-500 hover:bg-rose-600 text-white ring-8 ring-rose-100 animate-pulse'
                 : 'bg-[#1f3861] hover:bg-[#182c4d] text-white shadow-blue-100'
             }`}
           >
-            {isPipecatConnected && isPipecatMuted ? (
-              <MicOff className="w-7 h-7" />
-            ) : isListening ? (
+            {isListening ? (
               <MicOff className="w-7 h-7 animate-pulse" />
             ) : (
               <Mic className="w-7 h-7" />
@@ -660,15 +476,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
         </div>
 
         <p className="text-[11px] text-slate-500 font-medium">
-          {isPipecatConnecting
-            ? 'Connecting to the live voice agent…'
-            : isPipecatConnected && isPipecatMuted
-            ? 'Live voice is muted. Tap mic to unmute.'
-            : isPipecatConnected
-            ? 'Live voice is active. Speak naturally.'
-            : pipecatConfigured && pipecatError
-            ? 'Tap mic to retry live voice, or type below.'
-            : isAiLoading
+          {isAiLoading
             ? 'Extracting and verifying evidence…'
             : isListening
             ? 'Listening... Tap mic when done speaking'

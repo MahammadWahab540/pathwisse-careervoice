@@ -25,6 +25,10 @@ export interface PublishedCareerRoleGenome extends CareerRoleGenome {
   demandLevel?: string;
   streamId?: string;
   status: 'published';
+  branchAffinity?: {
+    affinityScore: number;
+    routeType: 'primary' | 'adjacent' | 'cross_track' | string;
+  };
 }
 
 function stringArray(value: unknown): string[] {

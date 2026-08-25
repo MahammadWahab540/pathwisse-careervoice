@@ -63,7 +63,7 @@ export async function getAuditSession(auditId: string): Promise<AuditSessionDto>
 }
 
 export async function sendQalamChat(input: SendQalamChatInput): Promise<QalamChatResponseDto> {
-  return api.post<QalamChatResponseDto>('/api/qalam/chat', input);
+  return api.post<QalamChatResponseDto>('/api/ai/chat', input);
 }
 
 export async function submitSkillSignal(input: SubmitSkillSignalInput): Promise<{

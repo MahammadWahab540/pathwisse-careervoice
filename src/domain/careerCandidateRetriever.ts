@@ -28,6 +28,12 @@ function branchFamily(branch?: string): string {
   return normalized;
 }
 
+function hasExplicitSwitchIntent(profile: StudentCareerSignalProfile): boolean {
+  const intent = (profile.explicitCareerIntent || '').toLowerCase();
+  if (profile.willingToSwitchDomain === true && /software|data|developer|coding|programming|it|ai|ml|cloud|cyber/.test(intent)) return true;
+  return /(switch|shift|move|change|transition|become|pursue|want|interested).*(software|data|developer|coding|programming|it|ai|ml|cloud|cyber)/.test(intent);
+}
+
 function genomeText(role: PublishedCareerRoleGenome): string {
   return textOf([
     role.title,
@@ -63,18 +69,23 @@ export function retrieveCareerCandidates(
   ]);
   const family = branchFamily(profile.branch);
   const intent = (profile.explicitCareerIntent || '').toLowerCase();
+  const explicitSwitchIntent = hasExplicitSwitchIntent(profile);
 
   const scored = roles
     .filter((role) => role.status === 'published')
     .map((role) => {
       const text = genomeText(role);
-      const branchRelevance = family && text.includes(family) ? 28 : 0;
+      const routeType = role.branchAffinity?.routeType;
+      const affinityScore = role.branchAffinity?.affinityScore;
+      const branchRelevance = affinityScore != null
+        ? affinityScore * 0.30
+        : family && text.includes(family) ? 28 : 0;
       const intentRelevance = intent ? overlapScore(intent, text) * 0.35 : 0;
       const signalRelevance = overlapScore(profileText, text) * 0.45;
-      const switchPenalty = !profile.willingToSwitchDomain && family && !text.includes(family) && /software|data|cloud|frontend|backend/.test(text)
-        ? -18
-        : 0;
-      return { role, score: branchRelevance + intentRelevance + signalRelevance + switchPenalty };
+      const isCrossTrack = routeType === 'cross_track' || (family && !text.includes(family) && /software|data|cloud|frontend|backend|developer|ml|ai|cyber/.test(text));
+      const switchPenalty = isCrossTrack && !explicitSwitchIntent ? -26 : 0;
+      const switchBoost = isCrossTrack && explicitSwitchIntent ? 12 : 0;
+      return { role, score: branchRelevance + intentRelevance + signalRelevance + switchPenalty + switchBoost };
     })
     .sort((a, b) => b.score - a.score || a.role.title.localeCompare(b.role.title));
 
