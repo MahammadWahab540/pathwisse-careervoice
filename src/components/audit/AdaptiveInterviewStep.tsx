@@ -171,7 +171,8 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       setQalamState(speaking ? 'SPEAKING' : 'LISTENING');
     },
     onError: (err) => {
-      console.warn('Pipecat WebRTC session notice:', err);
+      console.warn('Pipecat WebRTC session notice (activating direct browser voice engine):', err);
+      setUsePipecatEngine(false);
     },
   });
 
