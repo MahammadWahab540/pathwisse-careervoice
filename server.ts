@@ -1117,38 +1117,25 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return res.json({ success: true, phone, devMode: true, code: '123456' });
     }
 
-    if (!serverConfig.metaWhatsappOtpConfigured) {
-      return apiError(res, 503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'WhatsApp OTP is not configured.');
-    }
-
-    const token = generateOtpCode();
-    const verification = await supabase
-      .from('phone_verifications')
-      .insert({
-        phone,
-        otp_hash: hashOtp(phone, token),
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        verified: false,
-        attempts: 0,
-      })
-      .select('id')
-      .single();
-    if (verification.error || !verification.data) {
-      throw new PersistenceError('phone_verification_insert', verification.error?.message || 'Could not create OTP challenge.');
-    }
-
-    const messageId = await sendMetaWhatsappOtp(phone, token);
-    console.log('whatsapp_otp_requested', {
+    const result = await supabase.auth.signInWithOtp({
       phone,
-      verificationId: verification.data.id,
-      messageId,
+      options: { shouldCreateUser: true },
     });
-    return res.json({ success: true, phone, channel: 'whatsapp' });
+    if (result.error) {
+      if (/unsupported phone provider/i.test(result.error.message)) {
+        return apiError(
+          res,
+          503,
+          'SUPABASE_SMS_HOOK_NOT_CONFIGURED',
+          'Supabase Auth rejected phone OTP delivery. Configure the Send SMS Hook to use the WhatsApp Edge Function.'
+        );
+      }
+      return apiError(res, 400, 'OTP_REQUEST_FAILED', result.error.message);
+    }
+
+    return res.json({ success: true, phone, channel: serverConfig.metaWhatsappOtpConfigured ? 'whatsapp' : 'supabase_auth' });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
-    if (error instanceof Error && error.message === 'META_WHATSAPP_NOT_CONFIGURED') {
-      return apiError(res, 503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'WhatsApp OTP is not configured.');
-    }
     return handleRouteError(res, error, 'otp_request');
   }
 });
@@ -1174,39 +1161,11 @@ app.post('/api/auth/otp/verify', async (req, res) => {
       return res.json({ success: true, studentId: cleanId, phone, devMode: true });
     }
 
-    const challenge = await supabase
-      .from('phone_verifications')
-      .select('id,otp_hash,expires_at,attempts,verified')
-      .eq('phone', phone)
-      .eq('verified', false)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (challenge.error) throw new PersistenceError('phone_verification_read', challenge.error.message);
-    if (!challenge.data) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
+    const result = await supabase.auth.verifyOtp({ phone, token, type: 'sms' });
+    if (result.error) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', result.error.message);
+    if (!result.data.user) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'OTP could not be verified.');
 
-    if (new Date(String(challenge.data.expires_at)).getTime() < Date.now()) {
-      return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
-    }
-    if (Number(challenge.data.attempts || 0) >= 5) {
-      return apiError(res, 429, 'OTP_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Request a new code.');
-    }
-
-    if (challenge.data.otp_hash !== hashOtp(phone, token)) {
-      const attempts = Number(challenge.data.attempts || 0) + 1;
-      const update = await supabase.from('phone_verifications').update({ attempts }).eq('id', challenge.data.id);
-      if (update.error) throw new PersistenceError('phone_verification_attempt_update', update.error.message);
-      return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
-    }
-
-    const verified = await supabase
-      .from('phone_verifications')
-      .update({ verified: true, verified_at: new Date().toISOString() })
-      .eq('id', challenge.data.id);
-    if (verified.error) throw new PersistenceError('phone_verification_mark_verified', verified.error.message);
-
-    const studentId = await ensureVerifiedPhoneProfile(phone);
-    return res.json({ success: true, studentId, phone });
+    return res.json({ success: true, studentId: result.data.user.id, phone: result.data.user.phone || phone });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
     return handleRouteError(res, error, 'otp_verify');
