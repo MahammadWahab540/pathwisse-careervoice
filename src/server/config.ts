@@ -8,11 +8,12 @@ export interface ServerEnvironment {
 
 export interface ServerConfig {
   geminiApiKey?: string;
+  openrouterApiKey?: string;
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   pipecatServiceUrl?: string;
   pipecatServiceToken?: string;
-  openrouterApiKey?: string;
+  careervoiceServiceToken?: string;
   metaWhatsappAccessToken?: string;
   metaWhatsappPhoneNumberId?: string;
   metaWhatsappTemplateName?: string;
@@ -29,20 +30,22 @@ export interface ServerConfig {
   geminiLiveModel: string;
   enableGeminiLive: boolean;
   geminiConfigured: boolean;
+  openrouterConfigured: boolean;
   supabaseConfigured: boolean;
   pipecatConfigured: boolean;
   publicHealth: {
     status: 'ok' | 'degraded';
     geminiConfigured: boolean;
+    openrouterConfigured: boolean;
     supabaseConfigured: boolean;
     metaWhatsappOtpConfigured: boolean;
     pipecatConfigured: boolean;
-    openrouterConfigured: boolean;
     evaluationEngine: 'openrouter-http' | 'gemini-http' | 'unconfigured';
     voiceEngine: string;
     geminiLiveExperimental: boolean;
     geminiChatModel: string;
     geminiEvaluationModel: string;
+    openrouterLlmModel: string;
   };
 }
 
@@ -53,11 +56,12 @@ function clean(value: string | undefined): string | undefined {
 
 export function buildServerConfig(env: ServerEnvironment = process.env): ServerConfig {
   const geminiApiKey = clean(env.GEMINI_API_KEY);
+  const openrouterApiKey = clean(env.OPENROUTER_API_KEY);
   const supabaseUrl = clean(env.SUPABASE_URL);
   const supabaseServiceRoleKey = clean(env.SUPABASE_SERVICE_ROLE_KEY);
   const pipecatServiceUrl = clean(env.PIPECAT_SERVICE_URL) || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
   const pipecatServiceToken = clean(env.PIPECAT_SERVICE_TOKEN) || clean(env.CAREERVOICE_SERVICE_TOKEN);
-  const openrouterApiKey = clean(env.OPENROUTER_API_KEY);
+  const careervoiceServiceToken = pipecatServiceToken;
   const metaWhatsappAccessToken = clean(env.META_WHATSAPP_ACCESS_TOKEN) || clean(env.META_WA_ACCESS_TOKEN);
   const metaWhatsappPhoneNumberId = clean(env.META_WHATSAPP_PHONE_NUMBER_ID) || clean(env.META_WA_PHONE_NUMBER_ID);
   const metaWhatsappTemplateName = clean(env.META_WHATSAPP_TEMPLATE_NAME) || clean(env.META_WA_AUTH_TEMPLATE);
@@ -87,11 +91,12 @@ export function buildServerConfig(env: ServerEnvironment = process.env): ServerC
 
   return {
     geminiApiKey,
+    openrouterApiKey,
     supabaseUrl,
     supabaseServiceRoleKey,
     pipecatServiceUrl,
     pipecatServiceToken,
-    openrouterApiKey,
+    careervoiceServiceToken,
     metaWhatsappAccessToken,
     metaWhatsappPhoneNumberId,
     metaWhatsappTemplateName,
@@ -108,20 +113,22 @@ export function buildServerConfig(env: ServerEnvironment = process.env): ServerC
     geminiLiveModel,
     enableGeminiLive,
     geminiConfigured,
+    openrouterConfigured,
     supabaseConfigured,
     pipecatConfigured,
     publicHealth: {
       status: (openrouterConfigured || geminiConfigured) && supabaseConfigured ? 'ok' : 'degraded',
       geminiConfigured,
+      openrouterConfigured,
       supabaseConfigured,
       metaWhatsappOtpConfigured,
       pipecatConfigured,
-      openrouterConfigured,
       evaluationEngine: openrouterConfigured ? 'openrouter-http' : geminiConfigured ? 'gemini-http' : 'unconfigured',
       voiceEngine: 'browser-speech',
       geminiLiveExperimental: enableGeminiLive,
       geminiChatModel,
       geminiEvaluationModel,
+      openrouterLlmModel,
     },
   };
 }

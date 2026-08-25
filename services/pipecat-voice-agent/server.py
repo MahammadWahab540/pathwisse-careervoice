@@ -31,6 +31,8 @@ class StartSessionRequest(BaseModel):
     auditId: str = Field(..., max_length=64, description="Unique CareerVoice audit session UUID")
     targetRole: str = Field(..., max_length=100, description="Target career role being audited")
     studentName: Optional[str] = Field(default="Candidate", max_length=100, description="Candidate first name")
+    studentId: Optional[str] = Field(default=None, max_length=64, description="Candidate UUID")
+    userId: Optional[str] = Field(default=None, max_length=64, description="Candidate UUID (alias)")
     transport: Optional[str] = Field(default=None, max_length=20, description="Optional transport: 'daily' | 'livekit'")
     # Backwards compatibility fields: existing callers that pre-provisioned Daily rooms
     roomUrl: Optional[str] = Field(default=None, max_length=256, description="Pre-provisioned Daily room URL (deprecated)")
@@ -116,20 +118,23 @@ def readiness_check(response: Response):
     service_token_ok = bool(os.getenv("CAREERVOICE_SERVICE_TOKEN", "").strip())
     auth_ok = service_token_ok if app_env == "production" else True
 
+    openrouter_key = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
     deepgram_ok = bool(os.getenv("DEEPGRAM_API_KEY", "").strip())
+    stt_ok = deepgram_ok or openrouter_key
+
     cartesia_ok = bool(os.getenv("CARTESIA_API_KEY", "").strip())
     novita_ok = bool(os.getenv("NOVITA_API_KEY", "").strip() or os.getenv("FISH_AUDIO_API_KEY", "").strip())
-    tts_ok = cartesia_ok or novita_ok
+    tts_ok = openrouter_key or cartesia_ok or novita_ok
 
     gemini_ok = bool(os.getenv("GEMINI_API_KEY", "").strip())
     anthropic_ok = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
     openai_ok = bool(os.getenv("OPENAI_API_KEY", "").strip())
-    llm_ok = gemini_ok or anthropic_ok or openai_ok
+    llm_ok = openrouter_key or gemini_ok or anthropic_ok or openai_ok
 
     transport_status = router.get_readiness_status()
     has_any_transport = any(t["configured"] for t in transport_status.values())
 
-    is_ready = has_any_transport and llm_ok and deepgram_ok and tts_ok and auth_ok
+    is_ready = has_any_transport and llm_ok and stt_ok and tts_ok and auth_ok
 
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -141,6 +146,10 @@ def readiness_check(response: Response):
         "defaultTransport": router.default_transport,
         "fallbackTransport": router.fallback_transport,
         "providers": {
+            "openrouter": openrouter_key,
+            "openrouterLlm": openrouter_key,
+            "openrouterTts": openrouter_key,
+            "openrouterStt": openrouter_key,
             "deepgram": deepgram_ok,
             "cartesia": cartesia_ok,
             "novitaFish": novita_ok,
@@ -178,6 +187,8 @@ async def start_voice_session(
         has_supplied_room=bool(req.roomUrl and req.token),
     )
 
+    student_id = (req.studentId or req.userId or "").strip() or None
+
     try:
         # Compatibility Path: If caller supplied an existing Daily room & token
         if req.roomUrl and req.token:
@@ -189,6 +200,8 @@ async def start_voice_session(
                 audit_id=audit_id,
                 target_role=target_role,
                 student_name=student_name,
+                student_id=student_id,
+                user_id=student_id,
                 provider="daily",
                 room_url=room_url,
                 room_name=room_name,
@@ -223,6 +236,8 @@ async def start_voice_session(
             audit_id=audit_id,
             target_role=target_role,
             student_name=student_name,
+            student_id=student_id,
+            user_id=student_id,
             provider=provision_result.provider,
             room_url=provision_result.room_url,
             room_name=provision_result.room_name,

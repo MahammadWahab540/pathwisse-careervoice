@@ -11,7 +11,9 @@ interface UsePipecatVoiceOptions {
   studentId?: string;
   preferredTransport?: VoiceTransport;
   onTranscript?: (text: string, sender: 'user' | 'qalam') => void;
+  onBotSpeakingChange?: (isSpeaking: boolean) => void;
   onError?: (error: string) => void;
+  onConnected?: () => void;
 }
 
 function studentFacingVoiceError(error: unknown): string {
@@ -36,12 +38,15 @@ export function usePipecatVoice({
   studentId,
   preferredTransport = 'websocket',
   onTranscript,
+  onBotSpeakingChange,
   onError,
+  onConnected,
 }: UsePipecatVoiceOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [isBotSpeaking, setIsBotSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const callObjectRef = useRef<DailyCall | null>(null);
@@ -239,26 +244,18 @@ export function usePipecatVoice({
         return true;
       }
 
-      // 2. Instantiate audio-only Daily Call Object
-      const existingCall = DailyIframe.getCallInstance();
-      if (existingCall) {
+      // 2. Instantiate audio-only Daily Call Object safely
+      let callObject = DailyIframe.getCallInstance();
+      if (callObject) {
         try {
-          await existingCall.leave();
-          existingCall.destroy();
-        } catch {
-          // ignore cleanup on singleton instance
-        }
-      }
-      if (callObjectRef.current) {
-        try {
-          await callObjectRef.current.leave();
-          callObjectRef.current.destroy();
+          await callObject.leave();
+          callObject.destroy();
         } catch {
           // ignore cleanup on previous instance
         }
       }
 
-      const callObject = DailyIframe.createCallObject({
+      callObject = DailyIframe.createCallObject({
         audioSource: true,
         videoSource: false,
         dailyConfig: {
@@ -272,6 +269,7 @@ export function usePipecatVoice({
       callObject.on('joined-meeting', () => {
         setIsConnected(true);
         setIsConnecting(false);
+        onConnected?.();
       });
 
       callObject.on('left-meeting', () => {
@@ -279,6 +277,8 @@ export function usePipecatVoice({
         setIsConnecting(false);
         setIsSpeaking(false);
         setAudioLevel(0);
+        setIsBotSpeaking(false);
+        onBotSpeakingChange?.(false);
       });
 
       callObject.on('app-message', (evt: any) => {
@@ -295,7 +295,9 @@ export function usePipecatVoice({
 
       callObject.on('participant-updated', (evt: any) => {
         if (evt?.participant && !evt.participant.local) {
-          setIsSpeaking(Boolean(evt.participant.audio));
+          const speaking = Boolean(evt.participant.audio);
+          setIsBotSpeaking(speaking);
+          onBotSpeakingChange?.(speaking);
         }
       });
 
@@ -331,14 +333,15 @@ export function usePipecatVoice({
       setAudioLevel(0);
       return false;
     }
-  }, [pipecatServerUrl, auditId, targetRole, studentName, studentId, preferredTransport, cleanupWebSocketSession, sendPcmChunk, playIncomingAudio, onTranscript, onError]);
+  }, [pipecatServerUrl, auditId, targetRole, studentName, studentId, preferredTransport, cleanupWebSocketSession, sendPcmChunk, playIncomingAudio, onTranscript, onBotSpeakingChange, onError, onConnected]);
 
   const endSession = useCallback(async () => {
     await cleanupWebSocketSession();
-    if (callObjectRef.current) {
+    const callObject = callObjectRef.current || DailyIframe.getCallInstance();
+    if (callObject) {
       try {
-        await callObjectRef.current.leave();
-        callObjectRef.current.destroy();
+        await callObject.leave();
+        callObject.destroy();
       } catch (err) {
         console.warn('Error during Daily teardown:', err);
       }
@@ -348,8 +351,10 @@ export function usePipecatVoice({
     setIsConnecting(false);
     setIsSpeaking(false);
     setAudioLevel(0);
+    setIsBotSpeaking(false);
+    onBotSpeakingChange?.(false);
     setRoomUrl(null);
-  }, [cleanupWebSocketSession]);
+  }, [cleanupWebSocketSession, onBotSpeakingChange]);
 
   const toggleMute = useCallback(() => {
     if (wsRef.current) {
@@ -373,6 +378,7 @@ export function usePipecatVoice({
     isConnected,
     isConnecting,
     isSpeaking,
+    isBotSpeaking,
     audioLevel,
     isMuted,
     roomUrl,
