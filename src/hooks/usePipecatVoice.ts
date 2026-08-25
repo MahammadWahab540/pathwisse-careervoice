@@ -65,17 +65,18 @@ export function usePipecatVoice({
 
       setRoomUrl(sessionRoomUrl);
 
-      // 2. Instantiate audio-only Daily Call Object
-      if (callObjectRef.current) {
+      // 2. Instantiate audio-only Daily Call Object safely
+      let callObject = DailyIframe.getCallInstance();
+      if (callObject) {
         try {
-          await callObjectRef.current.leave();
-          callObjectRef.current.destroy();
+          await callObject.leave();
+          callObject.destroy();
         } catch {
           // ignore cleanup on previous instance
         }
       }
 
-      const callObject = DailyIframe.createCallObject({
+      callObject = DailyIframe.createCallObject({
         audioSource: true,
         videoSource: false,
         dailyConfig: {
@@ -135,10 +136,11 @@ export function usePipecatVoice({
   }, [pipecatServerUrl, auditId, targetRole, studentName, onTranscript, onBotSpeakingChange, onError, onConnected]);
 
   const endSession = useCallback(async () => {
-    if (callObjectRef.current) {
+    const callObject = callObjectRef.current || DailyIframe.getCallInstance();
+    if (callObject) {
       try {
-        await callObjectRef.current.leave();
-        callObjectRef.current.destroy();
+        await callObject.leave();
+        callObject.destroy();
       } catch (err) {
         console.warn('Error during Daily teardown:', err);
       }
