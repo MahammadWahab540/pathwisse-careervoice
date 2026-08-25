@@ -76,6 +76,7 @@ export async function extractCareerSignals(input: CareerSignalExtractionInput): 
       validate: (value) => {
         const normalized = normalizeCareerSignalProfile(value);
         if (normalized.extractionConfidence < 0) throw new AiResponseValidationError('Invalid extraction confidence.');
+        if (normalized.extractionConfidence < 50) return fallback;
         return normalized;
       },
     });

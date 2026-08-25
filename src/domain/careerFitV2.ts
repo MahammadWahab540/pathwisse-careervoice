@@ -90,6 +90,12 @@ function confidenceBand(score: number): RecommendationStrength {
   return 'EARLY_DIRECTION';
 }
 
+function hasExplicitSwitchIntent(profile: StudentCareerSignalProfile): boolean {
+  const intent = (profile.explicitCareerIntent || '').toLowerCase();
+  if (profile.willingToSwitchDomain === true && /software|data|developer|coding|programming|it|ai|ml|cloud|cyber/.test(intent)) return true;
+  return /(switch|shift|move|change|transition|become|pursue|want|interested).*(software|data|developer|coding|programming|it|ai|ml|cloud|cyber)/.test(intent);
+}
+
 export function calculateCareerFitV2(profile: StudentCareerSignalProfile, role: PublishedCareerRoleGenome): CareerFitV2Result {
   const descriptor = roleText(role);
   const demonstrated = text([
@@ -103,6 +109,7 @@ export function calculateCareerFitV2(profile: StudentCareerSignalProfile, role: 
   const problemStyle = signalText(profile.problemSolvingStyle);
   const branch = branchFamily(profile.branch);
   const intent = profile.explicitCareerIntent || '';
+  const explicitSwitchIntent = hasExplicitSwitchIntent(profile);
 
   const requiredSkillText = text(role.requiredSkills.map((skill) => skill.skill));
   const demonstratedCapability = Math.max(overlap(demonstrated, requiredSkillText), Math.round(overlap(claimed, requiredSkillText) * 0.55));
@@ -110,7 +117,17 @@ export function calculateCareerFitV2(profile: StudentCareerSignalProfile, role: 
   const interestFit = Math.max(overlap(interests, text(role.preferredInterests)), overlap(interests, descriptor));
   const workPreferenceFit = Math.max(overlap(preferences, text(role.workStyles)), overlap(preferences, text(role.environments)));
   const problemSolvingFit = overlap(problemStyle, text(role.problemTypes));
-  const foundationFit = branch && descriptor.includes(branch) ? 100 : profile.willingToSwitchDomain ? 55 : 35;
+  const routeType = role.branchAffinity?.routeType;
+  const affinityScore = role.branchAffinity?.affinityScore;
+  const foundationFit = affinityScore != null
+    ? routeType === 'primary'
+      ? clampCareerScore(affinityScore)
+      : routeType === 'adjacent'
+        ? clampCareerScore(affinityScore)
+        : explicitSwitchIntent
+          ? clampCareerScore(Math.max(45, affinityScore))
+          : clampCareerScore(Math.min(40, affinityScore))
+    : branch && descriptor.includes(branch) ? 100 : explicitSwitchIntent ? 55 : 35;
   const transition = clampCareerScore(100 - role.transitionDifficulty * 8 + (profile.learningWillingness || 50) * 0.2);
   const intentFit = intent ? overlap(intent, descriptor) : 0;
   const market = clampCareerScore(role.marketDemandScore ?? 50);
@@ -147,9 +164,11 @@ export function calculateCareerFitV2(profile: StudentCareerSignalProfile, role: 
     fitScore -= 15;
     contradictingSignals.push(`Missing prerequisite evidence: ${prerequisiteGap.slice(0, 3).join(', ')}.`);
   }
-  if (!profile.willingToSwitchDomain && foundationFit < 50 && role.transitionDifficulty >= 7) {
-    fitScore -= 10;
-    contradictingSignals.push('High transition difficulty without clear domain-switch intent.');
+  if (!explicitSwitchIntent && (routeType === 'cross_track' || (foundationFit < 50 && role.transitionDifficulty >= 7))) {
+    fitScore -= routeType === 'cross_track' ? 18 : 10;
+    contradictingSignals.push('Cross-track route without explicit software/data switch intent.');
+  } else if (explicitSwitchIntent && routeType === 'cross_track') {
+    fitScore += Math.round(demonstratedCapability * 0.08);
   }
   fitScore = clampCareerScore(fitScore);
 
@@ -206,11 +225,24 @@ export function calculateCareerFitV2(profile: StudentCareerSignalProfile, role: 
   };
 }
 
+function hasMeaningfulAdjacency(result: CareerFitV2Result, best: CareerFitV2Result): boolean {
+  if (result.role.adjacentRoleIds.includes(best.role.roleId) || best.role.adjacentRoleIds.includes(result.role.roleId)) return true;
+  if (result.role.branchAffinity?.routeType === 'adjacent') return true;
+  return result.components.demonstratedCapability >= 35 && result.role.transitionDifficulty <= 6;
+}
+
+function recommendationDirection(result: CareerFitV2Result, best: CareerFitV2Result, index: number): CareerRecommendationDirection {
+  const hasEvidence = result.evidenceUsed.length > 0 || result.components.demonstratedCapability >= 45;
+  const strongEnough = result.confidenceScore >= 55 && result.contradictingSignals.length === 0;
+  if (index === 0 && hasEvidence && strongEnough) return 'BEST_FIT';
+  if (index > 0 && hasMeaningfulAdjacency(result, best)) return 'ADJACENT_PATH';
+  return 'ASPIRATIONAL_PATH';
+}
+
 export function buildCareerRecommendationsV2(results: CareerFitV2Result[]): CareerRecommendationV2[] {
   const sorted = [...results].sort((a, b) => b.fitScore - a.fitScore || b.confidenceScore - a.confidenceScore || a.role.title.localeCompare(b.role.title));
   return sorted.slice(0, 3).map((result, index) => {
-    const direction: CareerRecommendationDirection =
-      index === 0 ? 'BEST_FIT' : result.role.transitionDifficulty <= 5 ? 'ADJACENT_PATH' : 'ASPIRATIONAL_PATH';
+    const direction = recommendationDirection(result, sorted[0], index);
     return {
       roleId: result.role.roleId,
       roleTitle: result.role.title,

@@ -133,6 +133,9 @@ export function buildFallbackCareerSignalProfile(input: {
     items.map((name) => ({ name, confidence: 55, source: name, evidenceLevel }));
   const toEvidence = (items: string[]) =>
     items.map((name) => ({ name, description: name, confidence: /built|deployed|created|designed|tested|intern/i.test(name) ? 68 : 50, source: name, evidenceLevel: 'DEMONSTRATED' as const }));
+  const explicitIntent = String(profile.explicitCareerIntent || input.careerIntent || '').trim();
+  const hasExplicitSwitchIntent = Boolean(profile.wantsIT) ||
+    /(switch|shift|move|change|transition|become|pursue|want|interested).*(software|data|developer|coding|programming|it|ai|ml|cloud|cyber)/i.test(explicitIntent);
   const dislikedWork = /dislike|hate|avoid|not interested in coding|no coding/i.test(source)
     ? [{ name: source.match(/(?:dislike|hate|avoid|not interested in|no)\s+([^.,;]+)/i)?.[1]?.trim() || 'stated dislike', confidence: 70, source, evidenceLevel: 'INTEREST' as const }]
     : [];
@@ -146,12 +149,19 @@ export function buildFallbackCareerSignalProfile(input: {
     projects: toEvidence(list('projects')),
     internships: toEvidence(list('internships')),
     strengths: toSignals(list('strengths'), 'CLAIMED'),
-    workPreferences: profile.workPreference ? toSignals([String(profile.workPreference)], 'INTEREST') : [],
-    dislikedWork,
-    explicitCareerIntent: String(profile.explicitCareerIntent || input.careerIntent || '').trim() || undefined,
-    willingToSwitchDomain: Boolean(profile.wantsIT) || /switch|software|it|coding|developer/i.test(String(profile.explicitCareerIntent || input.careerIntent || '')),
+    workPreferences: [
+      ...(profile.workPreference ? [String(profile.workPreference)] : []),
+      ...list('workPreferences'),
+    ].length
+      ? toSignals([...(profile.workPreference ? [String(profile.workPreference)] : []), ...list('workPreferences')], 'INTEREST')
+      : [],
+    dislikedWork: [...toSignals(list('dislikedWork'), 'INTEREST'), ...dislikedWork],
+    problemSolvingStyle: toSignals(list('problemSolvingStyle'), 'INTEREST'),
+    preferredEnvironment: toSignals(list('preferredEnvironment'), 'INTEREST'),
+    explicitCareerIntent: explicitIntent || undefined,
+    willingToSwitchDomain: hasExplicitSwitchIntent,
     learningWillingness: /learn|ready|willing|switch/i.test(source) ? 70 : 50,
-    constraints: [],
+    constraints: toSignals(list('constraints'), 'INTEREST'),
     extractionConfidence: source.trim().length > 200 ? 62 : 42,
   });
 }

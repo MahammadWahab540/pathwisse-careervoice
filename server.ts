@@ -151,6 +151,19 @@ function normalizedAcademicYear(value: unknown): number | null {
   return match ? Number(match[0]) : null;
 }
 
+function requestAcademicYear(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\s*[1-8](?:st|nd|rd|th)?(?:\s+year)?\s*$/i.test(value)
+      ? Number(value.match(/[1-8]/)?.[0])
+      : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 8) {
+    throw new Error('academicYear must be an integer between 1 and 8');
+  }
+  return parsed;
+}
+
 async function resolveStreamDatabaseId(streamIdOrCode: string | undefined): Promise<string | null> {
   if (!streamIdOrCode) return null;
   const supabase = requireSupabase();
@@ -481,6 +494,35 @@ async function loadPublishedCareerRoleGenomes(): Promise<PublishedCareerRoleGeno
     .filter((role): role is PublishedCareerRoleGenome => role !== null);
 }
 
+async function loadBranchStreamAffinity(branch?: string): Promise<Map<string, PublishedCareerRoleGenome['branchAffinity']>> {
+  const supabase = getSupabase();
+  if (!supabase || !branch) return new Map();
+  const normalized = branch.trim();
+  if (!normalized) return new Map();
+  const result = await supabase
+    .from('engineering_branches')
+    .select('id,name,code,engineering_branch_streams(stream_id,affinity_score,route_type,active)')
+    .eq('active', true)
+    .or(`code.eq.${normalized},name.ilike.%${normalized}%`)
+    .limit(1)
+    .maybeSingle();
+  if (result.error || !result.data) {
+    if (result.error) console.warn('branch_affinity_lookup_notice', result.error.message);
+    return new Map();
+  }
+  const rows = Array.isArray((result.data as any).engineering_branch_streams)
+    ? (result.data as any).engineering_branch_streams
+    : [];
+  return new Map(
+    rows
+      .filter((row: any) => row?.active !== false && row?.stream_id)
+      .map((row: any) => [String(row.stream_id), {
+        affinityScore: Number(row.affinity_score ?? 0),
+        routeType: String(row.route_type || 'cross_track'),
+      }]),
+  );
+}
+
 async function persistCareerDiscoverySignals(input: {
   studentId?: string;
   discoverySessionId?: string;
@@ -557,12 +599,17 @@ async function buildCareerIntelligenceV2(input: {
   discoveryProfile?: CareerDiscoveryProfile;
 }) {
   const started = Date.now();
-  const roles = await loadPublishedCareerRoleGenomes();
   const loaded = await loadDiscoveryProfile(input.studentId, {
     branch: input.branch,
     academicYear: input.academicYear || undefined,
     careerIntent: input.careerIntent,
   });
+  const roles = await loadPublishedCareerRoleGenomes();
+  const branchAffinity = await loadBranchStreamAffinity(loaded.branch || input.branch);
+  const rolesWithBranchAffinity = roles.map((role) => ({
+    ...role,
+    ...(role.streamId && branchAffinity.has(role.streamId) ? { branchAffinity: branchAffinity.get(role.streamId) } : {}),
+  }));
   const profile = {
     ...(input.discoveryProfile || {}),
     ...loaded.careerDiscoveryProfile,
@@ -579,13 +626,21 @@ async function buildCareerIntelligenceV2(input: {
     projectDescriptions: Array.isArray(profile.projects) ? profile.projects.map(String) : [],
     conversationText: messages.map((message: any) => String(message.content || '')),
   });
-  const candidates = retrieveCareerCandidates(signalProfile, roles);
+  const candidates = retrieveCareerCandidates(signalProfile, rolesWithBranchAffinity);
   const fitResults = candidates.map((role) => calculateCareerFitV2(signalProfile, role));
   const nextQuestion = planNextBestCareerQuestion(fitResults);
-  const recommendations = buildCareerRecommendationsV2(fitResults);
-  const top = fitResults.sort((a, b) => b.fitScore - a.fitScore)[0];
+  const publishedRoleTitles = new Map(rolesWithBranchAffinity.map((role) => [role.roleId, role.title]));
+  const recommendations = buildCareerRecommendationsV2(fitResults)
+    .filter((recommendation) => publishedRoleTitles.get(recommendation.roleId) === recommendation.roleTitle);
+  const sortedFitResults = [...fitResults].sort((a, b) => b.fitScore - a.fitScore || b.confidenceScore - a.confidenceScore);
+  const top = sortedFitResults[0];
+  const second = sortedFitResults[1];
   const recommendationConfidence = Math.max(0, Math.round(recommendations.reduce((sum, item) => sum + item.confidenceScore, 0) / Math.max(1, recommendations.length)));
-  const needsMoreDiscovery = !top || top.confidenceScore < 35 || Boolean(nextQuestion);
+  const closeTopRoles = Boolean(top && second && top.fitScore - second.fitScore < 8);
+  const conflictingSignals = Boolean(top && top.contradictingSignals.length > 0);
+  const poorExtraction = signalProfile.extractionConfidence < 50;
+  const weakEvidence = !top || top.confidenceScore < 55 || top.evidenceUsed.length === 0;
+  const needsMoreDiscovery = weakEvidence || closeTopRoles || conflictingSignals || poorExtraction || Boolean(nextQuestion);
   const enrichedRecommendations = recommendations.map((recommendation) => ({
     ...recommendation,
     ...(nextQuestion && nextQuestion.roleIds.includes(recommendation.roleId) ? { nextValidationQuestion: nextQuestion.prompt } : {}),
@@ -1153,11 +1208,14 @@ app.post('/api/career-intelligence/recommend', async (req, res) => {
   try {
     const studentId = requiredString(req.body?.studentId, 'studentId');
     const discoverySessionId = requiredString(req.body?.discoverySessionId, 'discoverySessionId');
+    if (req.body?.discoveryProfile !== undefined && !isRecord(req.body.discoveryProfile)) {
+      throw new Error('discoveryProfile must be an object');
+    }
     const result = await buildCareerIntelligenceV2({
       studentId,
       discoverySessionId,
       branch: optionalString(req.body?.branch),
-      academicYear: normalizedAcademicYear(req.body?.academicYear),
+      academicYear: requestAcademicYear(req.body?.academicYear),
       careerIntent: optionalString(req.body?.careerIntent),
       discoveryProfile: isRecord(req.body?.discoveryProfile)
         ? (req.body.discoveryProfile as CareerDiscoveryProfile)
@@ -1173,7 +1231,7 @@ app.post('/api/career-intelligence/recommend', async (req, res) => {
       persistence: result.persistence,
     });
   } catch (error) {
-    if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
+    if (error instanceof Error && /required|academicYear|discoveryProfile/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
     return handleRouteError(res, error, 'career_intelligence_recommend');
   }
 });
