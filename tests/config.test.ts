@@ -81,6 +81,7 @@ test('OpenRouter model configuration is exposed server-side only', () => {
   assert.equal(config.openrouterTtsModel, 'fish-audio/s2.1-pro');
   assert.equal(config.openrouterSttModel, 'openai/gpt-4o-mini-transcribe');
   assert.equal(config.publicHealth.evaluationEngine, 'openrouter-http');
+  assert.equal(config.publicHealth.voiceEngine, 'openrouter-turn-based');
   assert.equal('openrouterApiKey' in config.publicHealth, false);
 });
 

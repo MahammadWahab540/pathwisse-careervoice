@@ -35,6 +35,7 @@ import {
   getGeminiModelHealth,
   validateConfiguredGeminiModels,
 } from './src/server/gemini';
+import { synthesizeSpeech, transcribeAudio } from './src/server/openrouterAudio';
 import {
   createOrResumeAuditSession,
   getAuditSession,
@@ -914,7 +915,68 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
+app.post('/api/voice/transcribe', async (req, res) => {
+  try {
+    const audioBase64 = requiredString(req.body?.audioBase64, 'audioBase64');
+    const format = requiredString(req.body?.format, 'format');
+    const language = optionalString(req.body?.language);
+    const result = await transcribeAudio({ audioBase64, format, language });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    if (error instanceof AiUnavailableError) {
+      return apiError(res, 503, 'OPENROUTER_AUDIO_UNAVAILABLE', 'OpenRouter voice transcription is not configured.');
+    }
+    const status = Number((error as { status?: number })?.status);
+    if (status >= 400 && status < 500) {
+      return apiError(res, status, 'OPENROUTER_STT_FAILED', 'Voice transcription could not be completed.');
+    }
+    console.warn('openrouter_voice_transcribe_failed', { message: error instanceof Error ? error.message : String(error) });
+    return apiError(res, 502, 'OPENROUTER_STT_FAILED', 'Voice transcription could not be completed.');
+  }
+});
+
+app.post('/api/voice/speak', async (req, res) => {
+  try {
+    const text = requiredString(req.body?.text, 'text');
+    const voice = optionalString(req.body?.voice);
+    const requestedFormat = optionalString(req.body?.format);
+    const format = requestedFormat === 'wav' || requestedFormat === 'opus' || requestedFormat === 'mp3'
+      ? requestedFormat
+      : 'mp3';
+    const result = await synthesizeSpeech({ text, voice, format });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    if (error instanceof AiUnavailableError) {
+      return apiError(res, 503, 'OPENROUTER_AUDIO_UNAVAILABLE', 'OpenRouter text-to-speech is not configured.');
+    }
+    const status = Number((error as { status?: number })?.status);
+    if (status >= 400 && status < 500) {
+      return apiError(res, status, 'OPENROUTER_TTS_FAILED', 'Voice audio could not be generated.');
+    }
+    console.warn('openrouter_voice_speak_failed', { message: error instanceof Error ? error.message : String(error) });
+    return apiError(res, 502, 'OPENROUTER_TTS_FAILED', 'Voice audio could not be generated.');
+  }
+});
+
 app.get('/api/voice/status', async (_req, res) => {
+  if (serverConfig.openrouterApiKey) {
+    return res.json({
+      success: true,
+      ready: true,
+      provider: 'openrouter',
+      engine: 'openrouter-turn-based',
+      models: {
+        openrouterLlm: serverConfig.openrouterLlmModel,
+        openrouterTts: serverConfig.openrouterTtsModel,
+        openrouterStt: serverConfig.openrouterSttModel,
+      },
+      legacyPipecat: {
+        configured: serverConfig.pipecatConfigured,
+        serviceUrl: voiceServiceBaseUrl(),
+      },
+    });
+  }
+
   try {
     const serviceToken = voiceServiceToken();
     if (!serviceToken) {

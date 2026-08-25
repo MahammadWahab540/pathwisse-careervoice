@@ -124,7 +124,7 @@ export function buildServerConfig(env: ServerEnvironment = process.env): ServerC
       metaWhatsappOtpConfigured,
       pipecatConfigured,
       evaluationEngine: openrouterConfigured ? 'openrouter-http' : geminiConfigured ? 'gemini-http' : 'unconfigured',
-      voiceEngine: 'browser-speech',
+      voiceEngine: openrouterConfigured ? 'openrouter-turn-based' : 'browser-speech',
       geminiLiveExperimental: enableGeminiLive,
       geminiChatModel,
       geminiEvaluationModel,

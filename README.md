@@ -20,8 +20,8 @@ The broader Pathwisse learning journey is:
 - Generates 3–5 weighted career recommendations.
 - Runs an adaptive 1-on-1 career audit.
 - Persists discovery answers, skill signals, audit evidence, final reports, and recommendations.
-- Uses the deployed Pipecat voice service for live voice sessions when configured.
-- Falls back to browser voice only when the live voice service is not configured or unavailable.
+- Uses in-app OpenRouter STT, Qalam LLM, and TTS for production turn-based voice interviews.
+- Keeps Pipecat/Daily voice assets as legacy experimental infrastructure.
 
 ## Tech stack
 
@@ -30,8 +30,9 @@ The broader Pathwisse learning journey is:
 - Vite
 - Express
 - Supabase
-- Google Gemini HTTP models for chat/evaluation
-- Pipecat + Daily WebRTC for live voice
+- OpenRouter HTTP models for production chat/evaluation, STT, and TTS
+- Google Gemini HTTP models as fallback chat/evaluation support
+- Pipecat + Daily WebRTC for legacy experimental voice
 - Framer Motion / Motion for interaction states
 - Tailwind CSS v4
 
@@ -60,7 +61,7 @@ supabase/              Supabase-related project assets
 - npm
 - A Supabase project with the required CareerVoice tables
 - A Gemini API key for Qalam chat/evaluation flows
-- A Pipecat CareerVoice service token for live voice
+- An OpenRouter API key for production Qalam voice and LLM
 
 ## Local setup
 
@@ -89,7 +90,14 @@ GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 
+# Legacy/experimental Pipecat path.
 PIPECAT_SERVICE_URL=https://7pmmmiwq7m.ap-south-1.awsapprunner.com
+PIPECAT_SERVICE_TOKEN=
+
+OPENROUTER_API_KEY=
+OPENROUTER_LLM_MODEL=openrouter/auto,deepseek/deepseek-chat
+OPENROUTER_TTS_MODEL=fish-audio/s2.1-pro
+OPENROUTER_STT_MODEL=openai/gpt-4o-mini-transcribe
 CAREERVOICE_SERVICE_TOKEN=
 
 APP_URL=
@@ -99,8 +107,8 @@ PORT=3000
 Important:
 
 - Do not commit `.env`.
-- Keep `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, and `CAREERVOICE_SERVICE_TOKEN` server-side only.
-- The browser calls the same-origin Express proxy. It should never receive the CareerVoice service token.
+- Keep `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, and `PIPECAT_SERVICE_TOKEN` server-side only.
+- The browser calls the same-origin Express proxy. It should never receive provider API keys or service tokens.
 
 Start the local server:
 
@@ -125,29 +133,29 @@ http://127.0.0.1:3000
 | `GEMINI_LIVE_MODEL` | Optional | Gemini Live model name when enabled |
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side Supabase service key |
-| `PIPECAT_SERVICE_URL` | Yes for live voice | Deployed CareerVoice Pipecat service URL |
-| `CAREERVOICE_SERVICE_TOKEN` | Yes for live voice | Server-side token for the Pipecat service |
+| `PIPECAT_SERVICE_URL` | Optional legacy voice | Deployed CareerVoice Pipecat service URL for experimental sessions |
+| `PIPECAT_SERVICE_TOKEN` | Optional legacy voice | Server-side token for the Pipecat service; `CAREERVOICE_SERVICE_TOKEN` is supported as a deprecated alias |
+| `OPENROUTER_API_KEY` | Yes for production voice and OpenRouter LLM | Server-side OpenRouter API key used by Qalam chat, STT, and TTS |
+| `OPENROUTER_LLM_MODEL` | Optional | OpenRouter LLM model list; defaults to `openrouter/auto,deepseek/deepseek-chat` |
+| `OPENROUTER_TTS_MODEL` | Optional | OpenRouter TTS model; defaults to `fish-audio/s2.1-pro` |
+| `OPENROUTER_STT_MODEL` | Optional | OpenRouter STT model; defaults to `openai/gpt-4o-mini-transcribe` |
 | `APP_URL` | Optional | Public app URL for callbacks/self links |
 | `PORT` | Optional | Local/server port; use `3000` for local browser testing |
 
 ## Live voice integration
 
-The app uses `usePipecatVoice` for live audit voice sessions when `/api/health` reports:
+The production interview uses the in-app OpenRouter turn-based voice engine:
 
-```json
-{
-  "pipecatConfigured": true,
-  "voiceEngine": "pipecat-daily-webrtc"
-}
-```
+1. `useVoiceInteraction` records candidate speech with browser `MediaRecorder`.
+2. The browser posts base64 audio to `POST /api/voice/transcribe`.
+3. The server calls OpenRouter STT and returns the transcript.
+4. The transcript is submitted to the existing `POST /api/ai/chat` / `POST /api/qalam/chat` flow.
+5. The server uses OpenRouter first for Qalam reasoning, with Gemini fallback when configured.
+6. Qalam responses are sent to `POST /api/voice/speak`.
+7. The server calls OpenRouter TTS and returns base64 audio for browser playback.
+8. Extracted skill evidence is persisted through `/api/audit/evidence/signal`.
 
-Flow:
-
-1. Frontend requests `/api/voice/session`.
-2. Express forwards the request to the deployed Pipecat service.
-3. Express attaches `Authorization: Bearer CAREERVOICE_SERVICE_TOKEN`.
-4. Pipecat returns a Daily room URL and room token.
-5. Frontend joins the Daily room using `@daily-co/daily-js`.
+Browser speech recognition and `SpeechSynthesis` remain fallback paths. Daily, LiveKit, and Pipecat are not required for production browser voice interviews.
 
 Quick local check:
 
@@ -155,12 +163,11 @@ Quick local check:
 curl http://127.0.0.1:3000/api/health
 ```
 
-Expected live-voice fields:
+Expected voice field:
 
 ```json
 {
-  "pipecatConfigured": true,
-  "voiceEngine": "pipecat-daily-webrtc"
+  "voiceEngine": "openrouter-turn-based"
 }
 ```
 
@@ -201,6 +208,8 @@ Audit:
 
 Voice:
 
+- `POST /api/voice/transcribe`
+- `POST /api/voice/speak`
 - `POST /api/voice/session`
 
 Commercial and analytics:
