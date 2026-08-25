@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { Modality, Type, type LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
@@ -100,6 +100,159 @@ function requiredString(value: unknown, field: string): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function voiceServiceBaseUrl(): string {
+  return (serverConfig.pipecatServiceUrl || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com').replace(/\/+$/, '');
+}
+
+function voiceServiceWebSocketUrl(pathOrUrl: string): string {
+  if (/^wss?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const base = voiceServiceBaseUrl().replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+  return `${base}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`;
+}
+
+function voiceServiceToken(): string | undefined {
+  return serverConfig.pipecatServiceToken;
+}
+
+function validateServiceBearer(req: express.Request): boolean {
+  const configuredToken = voiceServiceToken();
+  const authorization = req.header('authorization') || '';
+  return Boolean(configuredToken && authorization === `Bearer ${configuredToken}`);
+}
+
+function normalizePhoneForOtp(value: string): string {
+  const trimmed = value.trim();
+  const prefix = trimmed.startsWith('+') ? '+' : '';
+  return `${prefix}${trimmed.replace(/\D/g, '')}`;
+}
+
+function whatsappRecipientPhone(value: string): string {
+  return normalizePhoneForOtp(value).replace(/^\+/, '');
+}
+
+function generateOtpCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+function hashOtp(phone: string, token: string): string {
+  const salt = serverConfig.supabaseServiceRoleKey || serverConfig.pipecatServiceToken || 'careervoice-local';
+  return createHash('sha256').update(`${normalizePhoneForOtp(phone)}:${token}:${salt}`).digest('hex');
+}
+
+function isOtpTestPhoneAllowed(phone: string): boolean {
+  const normalized = normalizePhoneForOtp(phone);
+  return serverConfig.otpTestPhoneAllowlist
+    .map(normalizePhoneForOtp)
+    .includes(normalized);
+}
+
+function devStudentIdForPhone(phone: string): string {
+  return 'dev_user_' + normalizePhoneForOtp(phone).replace(/\D/g, '');
+}
+
+async function sendMetaWhatsappOtp(phone: string, token: string): Promise<string | null> {
+  if (!serverConfig.metaWhatsappAccessToken || !serverConfig.metaWhatsappPhoneNumberId || !serverConfig.metaWhatsappTemplateName) {
+    throw new Error('META_WHATSAPP_NOT_CONFIGURED');
+  }
+
+  const url = `https://graph.facebook.com/${serverConfig.metaGraphApiVersion}/${serverConfig.metaWhatsappPhoneNumberId}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: whatsappRecipientPhone(phone),
+    type: 'template',
+    template: {
+      name: serverConfig.metaWhatsappTemplateName,
+      language: { code: serverConfig.metaWhatsappTemplateLanguage },
+      components: [
+        {
+          type: 'body',
+          parameters: [{ type: 'text', text: token }],
+        },
+        {
+          type: 'button',
+          sub_type: 'url',
+          index: '0',
+          parameters: [{ type: 'text', text: token }],
+        },
+      ],
+    },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serverConfig.metaWhatsappAccessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.warn('meta_whatsapp_otp_send_failed', {
+      status: response.status,
+      error: isRecord(body.error) ? body.error.message : undefined,
+    });
+    throw new Error(isRecord(body.error) && typeof body.error.message === 'string' ? body.error.message : 'WhatsApp OTP could not be sent.');
+  }
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  return typeof messages[0]?.id === 'string' ? messages[0].id : null;
+}
+
+async function findAuthUserIdByPhone(phone: string): Promise<string | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const normalized = normalizePhoneForOtp(phone);
+  const profile = await supabase.from('profiles').select('user_id').eq('phone', normalized).maybeSingle();
+  if (profile.error) throw new PersistenceError('profile_phone_lookup', profile.error.message);
+  if (profile.data?.user_id) return String(profile.data.user_id);
+
+  for (let page = 1; page <= 10; page += 1) {
+    const result = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (result.error) throw new PersistenceError('auth_user_phone_lookup', result.error.message);
+    const user = result.data.users.find((item) => normalizePhoneForOtp((item as { phone?: string }).phone || '') === normalized);
+    if (user) return user.id;
+    if (result.data.users.length < 1000) break;
+  }
+  return null;
+}
+
+async function ensureVerifiedPhoneProfile(phone: string): Promise<string> {
+  const supabase = requireSupabase();
+  const normalized = normalizePhoneForOtp(phone);
+  let userId = await findAuthUserIdByPhone(normalized);
+
+  if (!userId) {
+    const created = await supabase.auth.admin.createUser({
+      phone: normalized,
+      phone_confirm: true,
+      user_metadata: { phone_verified: true, whatsapp_opt_in: true },
+    } as any);
+    if (created.error || !created.data.user) {
+      throw new PersistenceError('auth_phone_user_create', created.error?.message || 'Could not create verified phone user.');
+    }
+    userId = created.data.user.id;
+  }
+
+  const profile = await supabase
+    .from('profiles')
+    .upsert(
+      {
+        user_id: userId,
+        phone: normalized,
+        phone_verified: true,
+        whatsapp_opt_in: true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    )
+    .select('user_id')
+    .single();
+  if (profile.error || !profile.data) {
+    throw new PersistenceError('verified_phone_profile_upsert', profile.error?.message || 'Profile could not be updated.');
+  }
+  return String(profile.data.user_id);
 }
 
 function apiError(
@@ -761,6 +914,73 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
+app.get('/api/voice/status', async (_req, res) => {
+  try {
+    const serviceToken = voiceServiceToken();
+    if (!serviceToken) {
+      return apiError(res, 500, 'VOICE_AUTH_NOT_CONFIGURED', 'PIPECAT_SERVICE_TOKEN is not configured on the server.');
+    }
+
+    const readyResponse = await fetch(`${voiceServiceBaseUrl()}/ready`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${serviceToken}` },
+    });
+
+    let upstream: Record<string, unknown> = {};
+    try {
+      const parsed = await readyResponse.json();
+      upstream = isRecord(parsed) ? parsed : {};
+    } catch {
+      upstream = { raw: await readyResponse.text().catch(() => '') };
+    }
+
+    if (!readyResponse.ok) {
+      return apiError(
+        res,
+        readyResponse.status,
+        'PIPECAT_READY_FAILED',
+        'The live voice service is not ready.',
+        upstream
+      );
+    }
+
+    const upstreamProviders = isRecord(upstream.providers) ? upstream.providers : {};
+    const upstreamTransports = isRecord(upstream.transports) ? upstream.transports : {};
+    const upstreamDaily = isRecord(upstreamTransports.daily) ? upstreamTransports.daily : {};
+    const upstreamWebSocket = isRecord(upstreamTransports.websocket) ? upstreamTransports.websocket : {};
+
+    return res.json({
+      success: true,
+      ready: true,
+      serviceUrl: voiceServiceBaseUrl(),
+      providers: {
+        ...upstreamProviders,
+        openrouter: upstreamProviders.openrouter === true || serverConfig.openrouterApiKey !== undefined,
+      },
+      transports: {
+        ...upstreamTransports,
+        daily: {
+          ...upstreamDaily,
+          configured: upstreamDaily.configured === true,
+        },
+        websocket: {
+          ...upstreamWebSocket,
+          configured: upstreamWebSocket.configured === true,
+        },
+      },
+      models: {
+        openrouterLlm: serverConfig.openrouterLlmModel,
+        openrouterTts: serverConfig.openrouterTtsModel,
+        openrouterStt: serverConfig.openrouterSttModel,
+      },
+      upstream,
+    });
+  } catch (error) {
+    console.warn('pipecat_status_check_failed', { message: error instanceof Error ? error.message : String(error) });
+    return apiError(res, 503, 'PIPECAT_STATUS_UNAVAILABLE', 'The live voice service status could not be checked.');
+  }
+});
+
 app.get('/api/colleges', async (_req, res) => {
   const supabase = getSupabase();
   if (!supabase) {
@@ -794,21 +1014,32 @@ app.post('/api/voice/session', async (req, res) => {
     const auditId = requiredString(req.body?.auditId, 'auditId');
     const targetRole = requiredString(req.body?.targetRole, 'targetRole');
     const studentName = optionalString(req.body?.studentName) || 'Candidate';
+    const studentId = optionalString(req.body?.studentId);
     const transport = optionalString(req.body?.transport) || 'daily';
 
-    const pipecatUrl = serverConfig.pipecatServiceUrl || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
-    const serviceToken = serverConfig.careervoiceServiceToken || process.env.CAREERVOICE_SERVICE_TOKEN;
+    const serviceToken = voiceServiceToken();
 
     if (!serviceToken) {
       return apiError(
         res,
         500,
         'VOICE_AUTH_NOT_CONFIGURED',
-        'CAREERVOICE_SERVICE_TOKEN is not configured on the server.'
+        'PIPECAT_SERVICE_TOKEN is not configured on the server.'
       );
     }
 
-    const pipecatResponse = await fetch(`${pipecatUrl}/api/voice/session`, {
+    if (UUID_RE.test(auditId)) {
+      const supabase = await requireDatabase(res);
+      if (!supabase) return;
+      const session = await getAuditSession(supabase, auditId);
+      if (studentId && studentId !== session.user_id) {
+        return apiError(res, 403, 'VOICE_SESSION_STUDENT_MISMATCH', 'studentId does not match the audit session.');
+      }
+    } else if (!devAuditSessions.has(auditId)) {
+      return apiError(res, 404, 'AUDIT_SESSION_NOT_FOUND', 'Audit session was not found.');
+    }
+
+    const pipecatResponse = await fetch(`${voiceServiceBaseUrl()}/api/voice/session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -818,6 +1049,7 @@ app.post('/api/voice/session', async (req, res) => {
         auditId,
         targetRole,
         studentName,
+        studentId,
         transport,
       }),
     });
@@ -837,26 +1069,27 @@ app.post('/api/voice/session', async (req, res) => {
     }
 
     const sessionData = await pipecatResponse.json();
+    const connection = isRecord(sessionData.connection) ? sessionData.connection : {};
+    const provider = optionalString(sessionData.provider) || transport;
+    const rawRoomUrl = optionalString(sessionData.roomUrl) || optionalString(connection.url);
+    const roomUrl = provider === 'websocket' && rawRoomUrl ? voiceServiceWebSocketUrl(rawRoomUrl) : rawRoomUrl;
+    const token = optionalString(sessionData.token) || optionalString(connection.token);
 
-    // Optionally record session activity in Supabase
-    const supabase = getSupabase();
-    if (supabase && UUID_RE.test(auditId)) {
-      try {
-        await supabase
-          .from('audit_evidence')
-          .insert({
-            session_id: auditId,
-            source: 'voice_probe',
-            evidence_strength: 'Moderate',
-            raw_text: `Live Pipecat voice session initiated for role: ${targetRole} via ${sessionData.provider || transport}`,
-          })
-          .select();
-      } catch (dbErr) {
-        console.warn('Non-blocking Supabase audit evidence logging warning:', dbErr);
-      }
-    }
-
-    return res.json(sessionData);
+    return res.json({
+      ...sessionData,
+      success: true,
+      auditId,
+      studentId: studentId || null,
+      provider,
+      roomUrl,
+      token,
+      connection: {
+        ...connection,
+        url: roomUrl,
+        token,
+        transport,
+      },
+    });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) {
       return apiError(res, 400, 'INVALID_REQUEST', error.message);
@@ -866,51 +1099,113 @@ app.post('/api/voice/session', async (req, res) => {
 });
 
 app.post('/api/auth/otp/request', async (req, res) => {
-  const phone = requiredString(req.body?.phone, 'phone');
-  const supabase = getSupabase();
-  if (!supabase) {
-    console.log(`[DEV_AUTH] Dev OTP code for ${phone} is 123456 (Supabase offline)`);
-    return res.json({ success: true, phone, devMode: true, code: '123456' });
-  }
   try {
-    const result = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: true } });
-    if (result.error) {
-      if (/unsupported phone provider/i.test(result.error.message)) {
-        console.log(`[DEV_AUTH] Dev OTP code for ${phone} is 123456 (Supabase SMS provider unavailable)`);
-        return res.json({ success: true, phone, devMode: true, code: '123456' });
-      }
-      return apiError(res, 400, 'OTP_REQUEST_FAILED', result.error.message);
+    const phone = normalizePhoneForOtp(requiredString(req.body?.phone, 'phone'));
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      return apiError(res, 400, 'INVALID_PHONE', 'Enter a valid phone number with country code.');
     }
-    return res.json({ success: true, phone });
+
+    if (isOtpTestPhoneAllowed(phone)) {
+      console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${serverConfig.otpTestCode}`);
+      return res.json({ success: true, phone, devMode: true });
+    }
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      console.log(`[DEV_AUTH] Dev OTP code for ${phone} is 123456 (Supabase offline)`);
+      return res.json({ success: true, phone, devMode: true, code: '123456' });
+    }
+
+    if (!serverConfig.metaWhatsappOtpConfigured) {
+      return apiError(res, 503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'WhatsApp OTP is not configured.');
+    }
+
+    const token = generateOtpCode();
+    const verification = await supabase
+      .from('phone_verifications')
+      .insert({
+        phone,
+        otp_hash: hashOtp(phone, token),
+        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        verified: false,
+        attempts: 0,
+      })
+      .select('id')
+      .single();
+    if (verification.error || !verification.data) {
+      throw new PersistenceError('phone_verification_insert', verification.error?.message || 'Could not create OTP challenge.');
+    }
+
+    const messageId = await sendMetaWhatsappOtp(phone, token);
+    console.log('whatsapp_otp_requested', {
+      phone,
+      verificationId: verification.data.id,
+      messageId,
+    });
+    return res.json({ success: true, phone, channel: 'whatsapp' });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
+    if (error instanceof Error && error.message === 'META_WHATSAPP_NOT_CONFIGURED') {
+      return apiError(res, 503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'WhatsApp OTP is not configured.');
+    }
     return handleRouteError(res, error, 'otp_request');
   }
 });
 
 app.post('/api/auth/otp/verify', async (req, res) => {
-  const phone = requiredString(req.body?.phone, 'phone');
-  const token = requiredString(req.body?.token, 'token');
-  if (!/^\d{6}$/.test(token)) return apiError(res, 400, 'INVALID_OTP', 'Enter the 6-digit verification code.');
-  const supabase = getSupabase();
-  if (!supabase) {
-    const cleanId = 'dev_user_' + phone.replace(/\D/g, '');
-    return res.json({ success: true, studentId: cleanId, phone, devMode: true });
-  }
   try {
-    const result = await supabase.auth.verifyOtp({ phone, token, type: 'sms' });
-    if (result.error) {
-      if (
-        token === '123456' &&
-        /unsupported phone provider|expired or is invalid/i.test(result.error.message)
-      ) {
-        const cleanId = 'dev_user_' + phone.replace(/\D/g, '');
-        return res.json({ success: true, studentId: cleanId, phone, devMode: true });
-      }
-      return apiError(res, 401, 'OTP_VERIFICATION_FAILED', result.error.message);
+    const phone = normalizePhoneForOtp(requiredString(req.body?.phone, 'phone'));
+    const token = requiredString(req.body?.token, 'token');
+    if (!/^\d{6}$/.test(token)) return apiError(res, 400, 'INVALID_OTP', 'Enter the 6-digit verification code.');
+
+    if (isOtpTestPhoneAllowed(phone) && token === serverConfig.otpTestCode) {
+      return res.json({
+        success: true,
+        studentId: devStudentIdForPhone(phone),
+        phone,
+        devMode: true,
+      });
     }
-    if (!result.data.user) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'OTP could not be verified.');
-    return res.json({ success: true, studentId: result.data.user.id, phone: result.data.user.phone || phone });
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      const cleanId = devStudentIdForPhone(phone);
+      return res.json({ success: true, studentId: cleanId, phone, devMode: true });
+    }
+
+    const challenge = await supabase
+      .from('phone_verifications')
+      .select('id,otp_hash,expires_at,attempts,verified')
+      .eq('phone', phone)
+      .eq('verified', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (challenge.error) throw new PersistenceError('phone_verification_read', challenge.error.message);
+    if (!challenge.data) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
+
+    if (new Date(String(challenge.data.expires_at)).getTime() < Date.now()) {
+      return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
+    }
+    if (Number(challenge.data.attempts || 0) >= 5) {
+      return apiError(res, 429, 'OTP_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Request a new code.');
+    }
+
+    if (challenge.data.otp_hash !== hashOtp(phone, token)) {
+      const attempts = Number(challenge.data.attempts || 0) + 1;
+      const update = await supabase.from('phone_verifications').update({ attempts }).eq('id', challenge.data.id);
+      if (update.error) throw new PersistenceError('phone_verification_attempt_update', update.error.message);
+      return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
+    }
+
+    const verified = await supabase
+      .from('phone_verifications')
+      .update({ verified: true, verified_at: new Date().toISOString() })
+      .eq('id', challenge.data.id);
+    if (verified.error) throw new PersistenceError('phone_verification_mark_verified', verified.error.message);
+
+    const studentId = await ensureVerifiedPhoneProfile(phone);
+    return res.json({ success: true, studentId, phone });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
     return handleRouteError(res, error, 'otp_verify');
@@ -1529,7 +1824,7 @@ app.post('/api/audit/session', async (req, res) => {
   }
 });
 
-app.post('/api/qalam/chat', async (req, res) => {
+app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
   try {
     const auditId = requiredString(req.body?.auditId, 'auditId');
     const userText = requiredString(req.body?.userText, 'userText');
@@ -1664,6 +1959,11 @@ Speak in 1-2 conversational sentences.`,
 
 app.post('/api/audit/evidence/signal', async (req, res) => {
   try {
+    const authorization = req.header('authorization');
+    if (authorization && !validateServiceBearer(req)) {
+      return apiError(res, 401, 'INVALID_SERVICE_TOKEN', 'Evidence signal token is invalid.');
+    }
+
     const signal = parseSkillSignalInput(req.body);
     if (signal.auditId.startsWith('dev_audit_') && devAuditSessions.has(signal.auditId)) {
       return res.status(201).json({
@@ -1675,6 +1975,7 @@ app.post('/api/audit/evidence/signal', async (req, res) => {
     }
     const supabase = await requireDatabase(res);
     if (!supabase) return;
+    await getAuditSession(supabase, signal.auditId);
     const persisted = await persistSkillSignal(supabase, signal);
     return res.status(201).json({ success: true, ...persisted });
   } catch (error) {
