@@ -88,6 +88,8 @@ $OpenRouterArn = Resolve-SecretArn "careervoice/openrouter-api-key"
 $DeepgramArn = Resolve-SecretArn "careervoice/deepgram-api-key"
 $CartesiaArn = Resolve-SecretArn "careervoice/cartesia-api-key"
 $NovitaArn = Resolve-SecretArn "careervoice/novita-api-key"
+if (-not $NovitaArn) { $NovitaArn = Resolve-SecretArn "careervoice/fish-audio-api-key" }
+$FishRefIdArn = Resolve-SecretArn "careervoice/fish-audio-reference-id"
 $GeminiArn = Resolve-SecretArn "careervoice/gemini-api-key"
 
 $DailyArn = Resolve-SecretArn "careervoice/daily-api-key"
@@ -145,6 +147,7 @@ if ($OpenRouterArn) { $SecretsList += "`"OPENROUTER_API_KEY`": `"$OpenRouterArn`
 if ($DeepgramArn) { $SecretsList += "`"DEEPGRAM_API_KEY`": `"$DeepgramArn`"" }
 if ($CartesiaArn) { $SecretsList += "`"CARTESIA_API_KEY`": `"$CartesiaArn`"" }
 if ($NovitaArn) { $SecretsList += "`"NOVITA_API_KEY`": `"$NovitaArn`"" }
+if ($FishRefIdArn) { $SecretsList += "`"FISH_AUDIO_REFERENCE_ID`": `"$FishRefIdArn`"" }
 if ($GeminiArn) { $SecretsList += "`"GEMINI_API_KEY`": `"$GeminiArn`"" }
 if ($DailyArn) { $SecretsList += "`"DAILY_API_KEY`": `"$DailyArn`"" }
 if ($HasLiveKit) {
