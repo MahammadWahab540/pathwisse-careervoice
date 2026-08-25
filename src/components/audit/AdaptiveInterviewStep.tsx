@@ -142,6 +142,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     };
   });
 
+
   const handleSpeechResult = (text: string) => {
     if (text.trim()) void submitAnswer(text.trim(), 'voice');
   };
@@ -269,8 +270,11 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       }
       trackEvent('career_audit_started', { auditId, role: role.id });
     }
-    return () => stopSpeaking();
-  }, [auditId, pipecatConfigured, role.id, voiceModeChecked]);
+    return () => {
+      stopSpeaking();
+      endPipecatSession();
+    };
+  }, [auditId, endPipecatSession, pipecatConfigured, role.id, speakText, stopSpeaking, voiceModeChecked]);
 
   async function submitAnswer(
     answerText: string,

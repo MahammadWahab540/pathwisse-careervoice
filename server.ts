@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import { Modality, Type, type LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
@@ -704,6 +704,30 @@ app.get('/api/health', async (_req, res) => {
     ...serverConfig.publicHealth,
     modelValidation: modelHealth,
   });
+});
+
+app.get('/api/voice/status', async (_req, res) => {
+  const pipecatUrl = serverConfig.pipecatServiceUrl || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
+  try {
+    const resp = await fetch(`${pipecatUrl}/ready`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    return res.status(resp.status).json({
+      localConfig: {
+        pipecatConfigured: serverConfig.pipecatConfigured,
+        voiceEngine: serverConfig.publicHealth.voiceEngine,
+      },
+      remoteService: data,
+    });
+  } catch (err: any) {
+    return res.status(503).json({
+      localConfig: {
+        pipecatConfigured: serverConfig.pipecatConfigured,
+        voiceEngine: serverConfig.publicHealth.voiceEngine,
+      },
+      error: 'PIPECAT_SERVICE_UNREACHABLE',
+      message: err?.message || 'Remote voice service unreachable',
+    });
+  }
 });
 
 app.get('/api/colleges', async (_req, res) => {
@@ -1604,8 +1628,26 @@ Speak in 1-2 conversational sentences.`,
   }
 });
 
+function verifyServiceToken(providedHeader: string | undefined, expectedToken: string | undefined): boolean {
+  if (!expectedToken) return true; // development mode if unconfigured
+  if (!providedHeader || !providedHeader.startsWith('Bearer ')) return false;
+  const provided = providedHeader.slice(7).trim();
+  if (!provided) return false;
+  const h1 = crypto.createHash('sha256').update(expectedToken).digest();
+  const h2 = crypto.createHash('sha256').update(provided).digest();
+  return crypto.timingSafeEqual(h1, h2);
+}
+
 app.post('/api/audit/evidence/signal', async (req, res) => {
   try {
+    const serviceToken = serverConfig.careervoiceServiceToken || process.env.CAREERVOICE_SERVICE_TOKEN;
+    if (serviceToken) {
+      const authHeader = req.headers.authorization;
+      if (!verifyServiceToken(authHeader, serviceToken)) {
+        return apiError(res, 401, 'UNAUTHORIZED', 'Invalid or missing Bearer service token.');
+      }
+    }
+
     const signal = parseSkillSignalInput(req.body);
     if (signal.auditId.startsWith('dev_audit_') && devAuditSessions.has(signal.auditId)) {
       return res.status(201).json({
@@ -1620,7 +1662,15 @@ app.post('/api/audit/evidence/signal', async (req, res) => {
     const persisted = await persistSkillSignal(supabase, signal);
     return res.status(201).json({ success: true, ...persisted });
   } catch (error) {
-    if (error instanceof Error && !(error instanceof PersistenceError)) return apiError(res, 400, 'INVALID_SIGNAL_CONTRACT', error.message);
+    if (error instanceof PersistenceError && error.operation === 'skill_signal_authorization') {
+      return apiError(res, 403, 'FORBIDDEN', error.message);
+    }
+    if (error instanceof PersistenceError && error.operation === 'audit_session_read') {
+      return apiError(res, 404, 'AUDIT_NOT_FOUND', error.message);
+    }
+    if (error instanceof Error && !(error instanceof PersistenceError)) {
+      return apiError(res, 400, 'INVALID_SIGNAL_CONTRACT', error.message);
+    }
     return handleRouteError(res, error, 'evidence_signal');
   }
 });
@@ -1903,7 +1953,10 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    const vite = await createViteServer({
+      server: { middlewareMode: true, hmr: { server: httpServer } },
+      appType: 'spa',
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
