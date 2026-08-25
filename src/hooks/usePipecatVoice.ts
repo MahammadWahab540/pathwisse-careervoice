@@ -12,6 +12,20 @@ interface UsePipecatVoiceOptions {
   onConnected?: () => void;
 }
 
+function studentFacingVoiceError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/permission|notallowed|not-allowed|microphone/i.test(message)) {
+    return 'Microphone access is blocked. Allow microphone access or continue by typing.';
+  }
+  if (/401|403|auth|token|credential|unauthorized/i.test(message)) {
+    return 'The live voice connection is not ready. Please check the local voice setup and try again.';
+  }
+  if (/network|fetch|failed|timeout|daily|webrtc|room/i.test(message)) {
+    return 'The live voice room could not be opened. You can try again or continue by typing.';
+  }
+  return 'The live voice session could not be started. You can try again or continue by typing.';
+}
+
 export function usePipecatVoice({
   pipecatServerUrl = '/api/voice/session',
   auditId,
@@ -52,7 +66,7 @@ export function usePipecatVoice({
 
       if (!res.ok) {
         const errBody = await res.text();
-        throw new Error(`Failed to initialize Pipecat voice session (${res.status}): ${errBody}`);
+        throw new Error(`voice_session_failed_${res.status}: ${errBody.slice(0, 200)}`);
       }
 
       const data = await res.json();
@@ -117,7 +131,7 @@ export function usePipecatVoice({
 
       callObject.on('error', (err: any) => {
         console.error('Daily WebRTC Session Error:', err);
-        onError?.(err?.errorMsg || 'Voice stream encountered an error.');
+        onError?.(studentFacingVoiceError(err?.errorMsg || err));
       });
 
       // 4. Join the Daily room
@@ -129,7 +143,7 @@ export function usePipecatVoice({
       return true;
     } catch (err: any) {
       console.error('Pipecat connection error:', err);
-      onError?.(err?.message || 'Failed to connect to voice server.');
+      onError?.(studentFacingVoiceError(err));
       setIsConnecting(false);
       return false;
     }

@@ -9,22 +9,28 @@ import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
 import { CareerVoiceConsultant } from './CareerVoiceConsultant';
 
 interface RoleDiscoveryStepProps {
+  studentId?: string;
   firstName: string;
   careerStreamId: string;
   departmentName: string;
   userRawIntent: string;
+  academicYear?: string;
   knownSkills?: string[];
+  discoveryProfile?: Record<string, unknown>;
   onSelectRoleForExplanation: (role: RoleRecommendationDto) => void;
   trackEvent: (eventName: string, metadata?: Record<string, unknown>) => void;
   onBack?: () => void;
 }
 
 export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
+  studentId,
   firstName,
   careerStreamId,
   departmentName,
   userRawIntent,
+  academicYear,
   knownSkills = [],
+  discoveryProfile,
   onSelectRoleForExplanation,
   trackEvent,
 }) => {
@@ -37,6 +43,9 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
     careerIntent: userRawIntent,
     branch: departmentName,
     knownSkills,
+    studentId,
+    academicYear,
+    discoveryProfile,
   });
 
   const subtitleText = `I analyzed your background and career intent against verified CareerVoice engineering tracks, ${firstName || 'friend'}. Here are your best-fitting directions.`;

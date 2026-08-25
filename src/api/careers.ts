@@ -11,6 +11,9 @@ export interface RecommendationInput {
   careerIntent?: string;
   branch?: string;
   knownSkills?: string[];
+  studentId?: string;
+  academicYear?: string | number;
+  discoveryProfile?: Record<string, unknown>;
 }
 
 export async function getCareerStreams(): Promise<CareerStreamDto[]> {

@@ -52,7 +52,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
     highlight: 'Turn your diagnostic scores into proven production code and verified credentials.',
     features: [
       '6-Week Guided Milestone Curriculum & Code Labs',
-      '1-on-1 Qalam AI Career Audit Deep Dive',
+      '1-on-1 Qalam career audit deep dive',
       'Live Resume & System Design Reviews with Senior Engineers',
       'Direct Referral Pipeline to Top Tech Companies',
       '24/7 Dedicated WhatsApp Mentor Support',
@@ -83,7 +83,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
         </div>
 
         <div>
-          <h3 className="text-lg font-bold text-[#0b111e]">Systematically Close Your Gaps</h3>
+          <h3 className="text-lg font-bold text-[#0b111e]">Close your readiness gaps</h3>
           <p className="text-xs text-slate-500 mt-1 leading-relaxed font-medium">
             {currentPlan.highlight}
           </p>

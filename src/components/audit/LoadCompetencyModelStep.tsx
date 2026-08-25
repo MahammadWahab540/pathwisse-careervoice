@@ -62,15 +62,15 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
       <QalamCharacter
         state={error ? 'ENCOURAGING' : 'CURIOUS'}
         subtitles={error
-          ? `I cannot audit ${role.title} until its verified competency benchmark is available.`
-          : `I am loading the published competency benchmark for ${role.title}, ${firstName || 'friend'}. Your audit will use only this server-side benchmark.`}
+          ? `I cannot audit ${role.title} until its readiness benchmark is available.`
+          : `I am loading the readiness benchmark for ${role.title}, ${firstName || 'friend'}. Your audit will use this role standard.`}
       />
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         {loading ? (
-          <div className="py-14 flex flex-col items-center justify-center gap-3 text-center">
+            <div className="py-14 flex flex-col items-center justify-center gap-3 text-center">
             <Loader2 className="w-7 h-7 animate-spin text-[#1f3861]" />
-            <div><p className="text-sm font-bold text-[#0b111e]">Loading verified benchmark</p><p className="text-xs text-slate-500 mt-1">No local seed model will be substituted.</p></div>
+            <div><p className="text-sm font-bold text-[#0b111e]">Loading your role benchmark</p><p className="text-xs text-slate-500 mt-1">Qalam is preparing the skills this role expects.</p></div>
           </div>
         ) : error || !model ? (
           <div className="py-8 space-y-4 text-center">
@@ -82,7 +82,7 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
           <>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1"><Cpu className="w-3 h-3" />Supabase Competency Benchmark</span>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1"><Cpu className="w-3 h-3" />Role readiness benchmark</span>
                 <h2 className="text-base font-bold text-[#0b111e] mt-0.5">{role.title}</h2>
               </div>
               <div className="text-right"><span className="text-[9px] font-bold text-slate-500 uppercase block">Hiring Bar</span><span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">{model.minimumReadinessBenchmark}+ / 100</span></div>
@@ -103,7 +103,7 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/70 flex items-start gap-2.5 text-left"><ShieldCheck className="w-4 h-4 text-[#1f3861] shrink-0 mt-0.5" /><p className="text-[11px] text-slate-700 leading-snug font-medium"><strong className="text-[#1f3861]">Audit rule:</strong> every score must point to persisted evidence, and every gap will be measured against the benchmark above.</p></div>
+            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/70 flex items-start gap-2.5 text-left"><ShieldCheck className="w-4 h-4 text-[#1f3861] shrink-0 mt-0.5" /><p className="text-[11px] text-slate-700 leading-snug font-medium"><strong className="text-[#1f3861]">Audit rule:</strong> every score must point to something you said, built, or uploaded.</p></div>
 
             <button type="button" onClick={() => { trackEvent('start_audit_from_model_clicked', { roleId: role.id }); onProceedToAudit(model); }} className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] shadow-md cursor-pointer"><span>Begin 1-on-1 Career Audit</span><ArrowRight className="w-4 h-4" /></button>
           </>

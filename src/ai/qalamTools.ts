@@ -64,6 +64,25 @@ export interface EvidenceUploadRequestArgs {
   required?: boolean;
 }
 
+export interface CareerRecommendationToolArgs {
+  recommendations: Array<{
+    roleId: string;
+    roleTitle: string;
+    direction: 'BEST_FIT' | 'ADJACENT_PATH' | 'ASPIRATIONAL_PATH';
+    fitScore: number;
+    confidenceScore: number;
+    supportingSignals: string[];
+    contradictingSignals: string[];
+    evidenceUsed: string[];
+    missingEvidence: string[];
+    transitionDifficulty: 'LOW' | 'MEDIUM' | 'HIGH';
+    nextValidationQuestion?: string;
+    explanation: string;
+  }>;
+  recommendationConfidence: number;
+  needsMoreDiscovery: boolean;
+}
+
 export interface QalamToolArgsMap {
   render_skill_radar: SkillRadarArgs;
   show_gap_analysis: GapAnalysisArgs;
@@ -71,6 +90,7 @@ export interface QalamToolArgsMap {
   update_readiness_score: ReadinessScoreArgs;
   show_competency_benchmark: CompetencyBenchmarkArgs;
   request_evidence_upload: EvidenceUploadRequestArgs;
+  show_career_recommendations: CareerRecommendationToolArgs;
 }
 
 export type QalamToolName = keyof QalamToolArgsMap;
@@ -134,6 +154,7 @@ Adaptive UI tools are available. Use them only when a visual or interactive surf
 - update_readiness_score: when a score has actually been calculated from audit evidence. Never invent a score.
 - show_competency_benchmark: only when a real role benchmark is present in context. Never invent benchmark values.
 - request_evidence_upload: when a material claim is weak/unsupported and a file, repository, portfolio, certificate, or project link would materially improve confidence.
+- show_career_recommendations: only after the deterministic Career Intelligence engine returns database-backed recommendations. If needsMoreDiscovery is true, ask the next question instead of presenting final cards.
 Call at most two adaptive UI tools per conversational turn. Do not call a tool merely for decoration. Keep speaking naturally even when a UI tool is used.
 `.trim();
 
@@ -281,6 +302,51 @@ export const QALAM_TOOL_DECLARATIONS = [
       required: ['skillName', 'reason', 'acceptedEvidence'],
     },
   },
+  {
+    name: 'show_career_recommendations',
+    description: 'Show database-backed Career Intelligence V2 recommendations after deterministic scoring has completed.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        recommendations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              roleId: { type: 'string' },
+              roleTitle: { type: 'string' },
+              direction: { type: 'string', enum: ['BEST_FIT', 'ADJACENT_PATH', 'ASPIRATIONAL_PATH'] },
+              fitScore: scoreSchema,
+              confidenceScore: scoreSchema,
+              supportingSignals: stringArraySchema,
+              contradictingSignals: stringArraySchema,
+              evidenceUsed: stringArraySchema,
+              missingEvidence: stringArraySchema,
+              transitionDifficulty: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+              nextValidationQuestion: { type: 'string' },
+              explanation: { type: 'string' },
+            },
+            required: [
+              'roleId',
+              'roleTitle',
+              'direction',
+              'fitScore',
+              'confidenceScore',
+              'supportingSignals',
+              'contradictingSignals',
+              'evidenceUsed',
+              'missingEvidence',
+              'transitionDifficulty',
+              'explanation',
+            ],
+          },
+        },
+        recommendationConfidence: scoreSchema,
+        needsMoreDiscovery: { type: 'boolean' },
+      },
+      required: ['recommendations', 'recommendationConfidence', 'needsMoreDiscovery'],
+    },
+  },
 ] as const;
 
 const TOOL_NAMES = new Set<QalamToolName>(QALAM_TOOL_DECLARATIONS.map((tool) => tool.name));
@@ -329,6 +395,20 @@ function normalizeStatus(value: unknown): RoadmapArgs['phases'][number]['status'
     return normalized;
   }
   return undefined;
+}
+
+function normalizeCareerDirection(value: unknown): CareerRecommendationToolArgs['recommendations'][number]['direction'] {
+  const normalized = asString(value).toUpperCase();
+  if (normalized === 'BEST_FIT' || normalized === 'ADJACENT_PATH' || normalized === 'ASPIRATIONAL_PATH') {
+    return normalized;
+  }
+  return 'ASPIRATIONAL_PATH';
+}
+
+function normalizeTransitionDifficulty(value: unknown): CareerRecommendationToolArgs['recommendations'][number]['transitionDifficulty'] {
+  const normalized = asString(value).toUpperCase();
+  if (normalized === 'LOW' || normalized === 'MEDIUM' || normalized === 'HIGH') return normalized;
+  return 'MEDIUM';
 }
 
 function baseCall<Name extends QalamToolName>(
@@ -445,6 +525,31 @@ export function normalizeQalamToolCall(
         ...(asOptionalString(args.prompt) ? { prompt: asOptionalString(args.prompt) } : {}),
         acceptedEvidence: asStringArray(args.acceptedEvidence),
         ...(typeof args.required === 'boolean' ? { required: args.required } : {}),
+      }, source);
+
+    case 'show_career_recommendations':
+      return baseCall(raw, name, {
+        recommendations: (Array.isArray(args.recommendations) ? args.recommendations : []).map((item) => {
+          const recommendation = asRecord(item);
+          return {
+            roleId: asString(recommendation.roleId),
+            roleTitle: asString(recommendation.roleTitle, 'Career direction'),
+            direction: normalizeCareerDirection(recommendation.direction),
+            fitScore: clampScore(recommendation.fitScore),
+            confidenceScore: clampScore(recommendation.confidenceScore),
+            supportingSignals: asStringArray(recommendation.supportingSignals),
+            contradictingSignals: asStringArray(recommendation.contradictingSignals),
+            evidenceUsed: asStringArray(recommendation.evidenceUsed),
+            missingEvidence: asStringArray(recommendation.missingEvidence),
+            transitionDifficulty: normalizeTransitionDifficulty(recommendation.transitionDifficulty),
+            ...(asOptionalString(recommendation.nextValidationQuestion)
+              ? { nextValidationQuestion: asOptionalString(recommendation.nextValidationQuestion) }
+              : {}),
+            explanation: asString(recommendation.explanation, 'This direction is based on current CareerVoice evidence.'),
+          };
+        }).filter((item) => item.roleId),
+        recommendationConfidence: clampScore(args.recommendationConfidence),
+        needsMoreDiscovery: Boolean(args.needsMoreDiscovery),
       }, source);
   }
 }

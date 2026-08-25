@@ -21,7 +21,16 @@ export function useRoleDetail(roleId?: string) {
 
 export function useRoleRecommendations(input: RecommendationInput, enabled = true) {
   return useQuery<RoleRecommendationDto[], Error>({
-    queryKey: ['role-recommendations', input.careerStreamId, input.careerIntent, input.branch, input.knownSkills],
+    queryKey: [
+      'role-recommendations',
+      input.studentId,
+      input.careerStreamId,
+      input.careerIntent,
+      input.branch,
+      input.academicYear,
+      input.knownSkills,
+      input.discoveryProfile,
+    ],
     queryFn: () => getRoleRecommendations(input),
     enabled: enabled && Boolean(input.careerStreamId || input.careerIntent),
     staleTime: 2 * 60 * 1000,

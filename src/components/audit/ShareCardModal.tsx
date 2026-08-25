@@ -21,7 +21,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
 
   if (!isOpen) return null;
 
-  const shareText = `I just audited my career readiness for ${role.title} with Qalam, Pathwisse's AI Career Auditor! Score: ${result.overallScore}/100. Get your free personalized career gap audit here: ${window.location.origin}`;
+  const shareText = `I just checked my career readiness for ${role.title} with Pathwisse Qalam. Score: ${result.overallScore}/100. Start your personalized career gap audit here: ${window.location.origin}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(shareText);
@@ -67,7 +67,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
             <span className="text-[10px] font-mono text-slate-300 font-bold tracking-wider">
               PATHWISSE CAREER AUDIT
             </span>
-            <span className="text-[10px] text-blue-200 font-medium">Verified by Qalam AI</span>
+            <span className="text-[10px] text-blue-200 font-medium">Verified by Qalam</span>
           </div>
 
           <div>

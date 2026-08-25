@@ -48,13 +48,13 @@ export const EvidenceUploadStep: React.FC<EvidenceUploadStepProps> = ({
       {/* Qalam Character */}
       <QalamCharacter
         state="ENCOURAGING"
-        subtitles="Sharing actual proof like your GitHub, LinkedIn, or Resume helps me give you a much more accurate career readiness score."
+        subtitles="Sharing proof like your resume, LinkedIn, projects, portfolio, or internship work helps me give you a more accurate readiness score."
       />
 
       {/* Upload Inputs */}
       <div className="w-full bg-white border border-[#e1e7ef] rounded-2xl p-5 my-4 shadow-sm text-left space-y-4">
         <h3 className="text-xs font-bold text-[#0b111e] uppercase tracking-wider flex items-center justify-between">
-          <span>Project & Proof Evidence (Optional)</span>
+          <span>Project & proof details (optional)</span>
           <span className="text-[10px] text-[#1f3861] font-mono font-bold">Step 6 of 6</span>
         </h3>
 
@@ -133,7 +133,7 @@ export const EvidenceUploadStep: React.FC<EvidenceUploadStepProps> = ({
               type="text"
               value={internshipDetails}
               onChange={(e) => setInternshipDetails(e.target.value)}
-              placeholder="e.g. 2-month SDE Intern at startup building APIs..."
+              placeholder="e.g. 2-month internship designing HVAC layouts, building a dashboard, or improving a process..."
               className="w-full bg-[#f8fafc] border border-[#e1e7ef] rounded-lg px-3 py-2 text-xs text-[#0b111e] focus:outline-none focus:border-[#1f3861]"
             />
           </div>
@@ -145,7 +145,7 @@ export const EvidenceUploadStep: React.FC<EvidenceUploadStepProps> = ({
             onClick={handleSubmit}
             className="w-full py-3 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-semibold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition"
           >
-            <span>Generate My Career Audit Results</span>
+            <span>Generate my career audit report</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
