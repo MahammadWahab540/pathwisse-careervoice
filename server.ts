@@ -256,6 +256,30 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
+app.get('/api/voice/status', async (_req, res) => {
+  const pipecatUrl = serverConfig.pipecatServiceUrl || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
+  try {
+    const resp = await fetch(`${pipecatUrl}/ready`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    return res.status(resp.status).json({
+      localConfig: {
+        pipecatConfigured: serverConfig.pipecatConfigured,
+        voiceEngine: serverConfig.publicHealth.voiceEngine,
+      },
+      remoteService: data,
+    });
+  } catch (err: any) {
+    return res.status(503).json({
+      localConfig: {
+        pipecatConfigured: serverConfig.pipecatConfigured,
+        voiceEngine: serverConfig.publicHealth.voiceEngine,
+      },
+      error: 'PIPECAT_SERVICE_UNREACHABLE',
+      message: err?.message || 'Remote voice service unreachable',
+    });
+  }
+});
+
 app.post('/api/voice/session', async (req, res) => {
   try {
     const auditId = requiredString(req.body?.auditId, 'auditId');

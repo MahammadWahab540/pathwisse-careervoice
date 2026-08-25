@@ -84,8 +84,10 @@ function Resolve-SecretArn([string]$SecretId) {
 }
 
 $ServiceTokenArn = Resolve-SecretArn "careervoice/service-token"
+$OpenRouterArn = Resolve-SecretArn "careervoice/openrouter-api-key"
 $DeepgramArn = Resolve-SecretArn "careervoice/deepgram-api-key"
 $CartesiaArn = Resolve-SecretArn "careervoice/cartesia-api-key"
+$NovitaArn = Resolve-SecretArn "careervoice/novita-api-key"
 $GeminiArn = Resolve-SecretArn "careervoice/gemini-api-key"
 
 $DailyArn = Resolve-SecretArn "careervoice/daily-api-key"
@@ -99,9 +101,24 @@ $OpenAiArn = Resolve-SecretArn "careervoice/openai-api-key"
 # Validate required production secrets
 $MissingRequired = $false
 if (-not $ServiceTokenArn) { Write-Error "Missing required secret: careervoice/service-token"; $MissingRequired = $true }
-if (-not $DeepgramArn) { Write-Error "Missing required secret: careervoice/deepgram-api-key"; $MissingRequired = $true }
-if (-not $CartesiaArn) { Write-Error "Missing required secret: careervoice/cartesia-api-key"; $MissingRequired = $true }
-if (-not $GeminiArn) { Write-Error "Missing required secret: careervoice/gemini-api-key"; $MissingRequired = $true }
+
+# STT: Deepgram or OpenRouter
+if (-not $DeepgramArn -and -not $OpenRouterArn) {
+  Write-Error "Missing required STT secret: careervoice/deepgram-api-key or careervoice/openrouter-api-key"
+  $MissingRequired = $true
+}
+
+# TTS: OpenRouter, Cartesia, or Novita
+if (-not $OpenRouterArn -and -not $CartesiaArn -and -not $NovitaArn) {
+  Write-Error "Missing required TTS secret: careervoice/openrouter-api-key, careervoice/cartesia-api-key, or careervoice/novita-api-key"
+  $MissingRequired = $true
+}
+
+# LLM: OpenRouter, Gemini, Anthropic, or OpenAI
+if (-not $OpenRouterArn -and -not $GeminiArn -and -not $AnthropicArn -and -not $OpenAiArn) {
+  Write-Error "Missing required LLM secret: careervoice/openrouter-api-key or careervoice/gemini-api-key"
+  $MissingRequired = $true
+}
 
 $HasDaily = [bool]$DailyArn
 $HasLiveKit = [bool]($LiveKitUrlArn -and $LiveKitKeyArn -and $LiveKitSecretArn)
@@ -116,12 +133,14 @@ if ($MissingRequired) {
 }
 
 $SecretsList = @(
-  "`"CAREERVOICE_SERVICE_TOKEN`": `"$ServiceTokenArn`"",
-  "`"DEEPGRAM_API_KEY`": `"$DeepgramArn`"",
-  "`"CARTESIA_API_KEY`": `"$CartesiaArn`"",
-  "`"GEMINI_API_KEY`": `"$GeminiArn`""
+  "`"CAREERVOICE_SERVICE_TOKEN`": `"$ServiceTokenArn`""
 )
 
+if ($OpenRouterArn) { $SecretsList += "`"OPENROUTER_API_KEY`": `"$OpenRouterArn`"" }
+if ($DeepgramArn) { $SecretsList += "`"DEEPGRAM_API_KEY`": `"$DeepgramArn`"" }
+if ($CartesiaArn) { $SecretsList += "`"CARTESIA_API_KEY`": `"$CartesiaArn`"" }
+if ($NovitaArn) { $SecretsList += "`"NOVITA_API_KEY`": `"$NovitaArn`"" }
+if ($GeminiArn) { $SecretsList += "`"GEMINI_API_KEY`": `"$GeminiArn`"" }
 if ($DailyArn) { $SecretsList += "`"DAILY_API_KEY`": `"$DailyArn`"" }
 if ($LiveKitUrlArn) {
   $SecretsList += "`"LIVEKIT_URL`": `"$LiveKitUrlArn`""

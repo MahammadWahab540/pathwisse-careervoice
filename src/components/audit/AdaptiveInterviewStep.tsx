@@ -5,6 +5,7 @@ import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { CaptionsDisplay } from '../voice/CaptionsDisplay';
 import { EvidenceCoverageList } from './EvidenceCoverageList';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
+import { usePipecatVoice } from '../../hooks/usePipecatVoice';
 import { useRoleCompetencies } from '../../hooks/useCareerRoles';
 import { sendQalamChat, submitSkillSignal } from '../../api/audit';
 import type {
@@ -138,6 +139,42 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     };
   });
 
+  const [usePipecatEngine, setUsePipecatEngine] = useState(true);
+
+  const handlePipecatTranscript = (text: string, sender: 'user' | 'qalam') => {
+    if (sender === 'user') {
+      if (text.trim()) void submitAnswer(text.trim(), 'voice');
+    } else {
+      setMessages((prev) => {
+        // Prevent duplicate messages if already present
+        if (prev.some((m) => m.text === text)) return prev;
+        return [
+          ...prev,
+          {
+            id: `pipecat_${Date.now()}`,
+            sender: 'qalam',
+            text,
+            timestamp: Date.now(),
+            qalamState: 'SPEAKING',
+          },
+        ];
+      });
+    }
+  };
+
+  const pipecatVoice = usePipecatVoice({
+    auditId,
+    targetRole: role.title,
+    studentName: firstName || studentContext?.name || 'Candidate',
+    onTranscript: handlePipecatTranscript,
+    onBotSpeakingChange: (speaking) => {
+      setQalamState(speaking ? 'SPEAKING' : 'LISTENING');
+    },
+    onError: (err) => {
+      console.warn('Pipecat WebRTC session notice:', err);
+    },
+  });
+
   const handleSpeechResult = (text: string) => {
     if (text.trim()) void submitAnswer(text.trim(), 'voice');
   };
@@ -172,10 +209,21 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       };
       setMessages([initialMessage]);
       setQalamState('SPEAKING');
+
+      // Attempt Pipecat WebRTC initialization in background
+      if (usePipecatEngine) {
+        pipecatVoice.startSession().catch((e) => {
+          console.warn('Pipecat session startup warning:', e);
+        });
+      }
+
       speakText(initialPrompt, () => setQalamState('LISTENING'));
       trackEvent('career_audit_started', { auditId, role: role.id });
     }
-    return () => stopSpeaking();
+    return () => {
+      stopSpeaking();
+      pipecatVoice.endSession();
+    };
   }, [auditId, role.id]);
 
   const submitAnswer = async (

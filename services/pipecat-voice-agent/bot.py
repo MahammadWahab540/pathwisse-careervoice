@@ -32,12 +32,24 @@ from pipecat.processors.aggregators.llm_response import (
 from transports import router, VoiceSessionConfig
 
 CAREERVOICE_API_URL = os.getenv("CAREERVOICE_API_URL", "http://localhost:5000").rstrip("/")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_LLM_MODEL = os.getenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini").strip()
+OPENROUTER_TTS_MODEL = os.getenv("OPENROUTER_TTS_MODEL", "openai/gpt-4o-mini-tts-2025-12-15").strip()
+OPENROUTER_TTS_VOICE = os.getenv("OPENROUTER_TTS_VOICE", "alloy").strip()
+OPENROUTER_STT_MODEL = os.getenv("OPENROUTER_STT_MODEL", "openai/whisper-large-v3").strip()
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "").strip()
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
+from services import (
+    FishAudioTTSService,
+    OpenRouterTTSService,
+    OpenRouterSTTService,
+    FallbackTTSService,
+)
 
 
 # ==============================================================================
@@ -243,6 +255,8 @@ async def evaluate_student_evidence_llm(
     Supports Gemini -> Anthropic -> OpenAI provider fallback.
     Hardened against prompt injection: Candidate transcript is treated strictly as untrusted data.
     """
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_model = os.getenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini").strip()
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
@@ -297,7 +311,44 @@ Analyze the candidate transcript above according to the security and evaluation 
     try:
         raw_json_str = None
 
-        if gemini_key:
+        # 1. Primary: OpenRouter LLM Evaluation
+        if openrouter_key:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://careervoice.pathwisse.com",
+                "X-Title": "Pathwisse CareerVoice Agent",
+            }
+            payload = {
+                "model": openrouter_model,
+                "temperature": 0.1,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt},
+                ],
+            }
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            choices = data.get("choices", [])
+                            if choices:
+                                raw_json_str = choices[0]["message"]["content"]
+                        else:
+                            logger.warning(f"openrouter_evidence_eval_api_error status={resp.status}")
+            except Exception as ore:
+                logger.warning(f"openrouter_evidence_eval_error: {ore}")
+
+        # 2. Fallback: Google Gemini
+        if not raw_json_str and gemini_key:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
             payload = {
                 "systemInstruction": {"parts": [{"text": system_instruction}]},
@@ -307,21 +358,25 @@ Analyze the candidate transcript above according to the security and evaluation 
                     "response_mime_type": "application/json",
                 },
             }
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            raw_json_str = candidates[0]["content"]["parts"][0]["text"]
-                    else:
-                        logger.warning("gemini_evidence_eval_api_error", status=resp.status)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                raw_json_str = candidates[0]["content"]["parts"][0]["text"]
+                        else:
+                            logger.warning(f"gemini_evidence_eval_api_error status={resp.status}")
+            except Exception as gme:
+                logger.warning(f"gemini_evidence_eval_error: {gme}")
 
-        elif anthropic_key:
+        # 3. Fallback: Anthropic Claude
+        if not raw_json_str and anthropic_key:
             url = "https://api.anthropic.com/v1/messages"
             headers = {
                 "x-api-key": anthropic_key,
@@ -335,20 +390,24 @@ Analyze the candidate transcript above according to the security and evaluation 
                 "system": system_instruction,
                 "messages": [{"role": "user", "content": user_prompt}],
             }
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        content = data.get("content", [])
-                        if content:
-                            raw_json_str = content[0].get("text", "")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            content = data.get("content", [])
+                            if content:
+                                raw_json_str = content[0].get("text", "")
+            except Exception as ace:
+                logger.warning(f"anthropic_evidence_eval_error: {ace}")
 
-        elif openai_key:
+        # 4. Fallback: OpenAI Direct
+        if not raw_json_str and openai_key:
             url = "https://api.openai.com/v1/chat/completions"
             headers = {"Authorization": f"Bearer {openai_key}"}
             payload = {
@@ -360,16 +419,19 @@ Analyze the candidate transcript above according to the security and evaluation 
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        raw_json_str = data["choices"][0]["message"]["content"]
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            raw_json_str = data["choices"][0]["message"]["content"]
+            except Exception as oae:
+                logger.warning(f"openai_evidence_eval_error: {oae}")
 
         if not raw_json_str:
             return None
@@ -589,91 +651,129 @@ class CareerVoiceEvidenceEvaluator(FrameProcessor):
 # ==============================================================================
 # LLM Service Factory
 # ==============================================================================
-def create_llm_service(provider_preference: str = "gemini"):
+def create_llm_service(provider_preference: Optional[str] = None):
     """
-    Instantiates the configured LLM provider service based on availability.
+    Instantiates the configured LLM provider service based on availability and preference.
     Order of selection:
-    1. Google Gemini (configured model via GEMINI_MODEL, defaults to gemini-3.6-flash)
-    2. Anthropic Claude 3.5 Sonnet
-    3. OpenAI GPT-4o-mini
+    1. OpenRouter (OPENROUTER_API_KEY, default model: OPENROUTER_LLM_MODEL or 'openai/gpt-4o-mini')
+    2. Google Gemini (GEMINI_API_KEY, model: GEMINI_MODEL or 'gemini-3.6-flash')
+    3. Anthropic Claude 3.5 Sonnet
+    4. OpenAI GPT-4o-mini
     """
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_model = os.getenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini").strip()
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     openai_key = os.getenv("OPENAI_API_KEY", "").strip()
 
-    if gemini_key and provider_preference == "gemini":
-        logger.info("Initializing Google Gemini as Primary LLM", model=gemini_model)
+    pref = (provider_preference or os.getenv("LLM_PROVIDER", "openrouter")).strip().lower()
+
+    if openrouter_key and (pref in ("openrouter", "auto") or not (gemini_key or anthropic_key or openai_key)):
+        logger.info(f"Initializing OpenRouter as Primary LLM (model={openrouter_model})")
+        return OpenAILLMService(
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1",
+            model=openrouter_model,
+        )
+    elif gemini_key and pref == "gemini":
+        logger.info(f"Initializing Google Gemini as Primary LLM (model={gemini_model})")
+        return GoogleLLMService(
+            api_key=gemini_key,
+            model=gemini_model,
+        )
+    elif openrouter_key:
+        logger.info(f"Initializing OpenRouter as LLM fallback (model={openrouter_model})")
+        return OpenAILLMService(
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1",
+            model=openrouter_model,
+        )
+    elif gemini_key:
+        logger.info(f"Initializing Google Gemini as LLM fallback (model={gemini_model})")
         return GoogleLLMService(
             api_key=gemini_key,
             model=gemini_model,
         )
     elif anthropic_key:
-        logger.info("Initializing Anthropic Claude as LLM", model="claude-3-5-sonnet-20241022")
+        logger.info("Initializing Anthropic Claude as LLM fallback (model=claude-3-5-sonnet-20241022)")
         return AnthropicLLMService(
             api_key=anthropic_key,
             model="claude-3-5-sonnet-20241022",
         )
     elif openai_key:
-        logger.info("Initializing OpenAI GPT-4o-mini as LLM", model="gpt-4o-mini")
+        logger.info("Initializing OpenAI GPT-4o-mini as LLM fallback (model=gpt-4o-mini)")
         return OpenAILLMService(
             api_key=openai_key,
             model="gpt-4o-mini",
         )
-    elif gemini_key:
-        logger.info("Initializing Google Gemini fallback", model=gemini_model)
-        return GoogleLLMService(
-            api_key=gemini_key,
-            model=gemini_model,
-        )
     else:
         raise RuntimeError(
-            "No usable LLM provider is configured. One of GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY must be set."
+            "No usable LLM provider is configured. One of OPENROUTER_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY must be set."
         )
-
-
-from services import FishAudioTTSService
 
 
 # ==============================================================================
-# TTS Service Factory
+# TTS Service Factory with Multi-Tier Fallback
 # ==============================================================================
 def create_tts_service(provider_preference: Optional[str] = None):
     """
-    Instantiates the configured TTS provider based on availability and preference.
-    Supported:
-    1. Cartesia Sonic (CARTESIA_API_KEY)
-    2. Novita AI / Fish Audio S1 (NOVITA_API_KEY or FISH_AUDIO_API_KEY)
+    Instantiates the configured TTS provider chain with automatic fallback.
+    Supported providers:
+    1. OpenRouter TTS (OPENROUTER_API_KEY)
+    2. Cartesia Sonic (CARTESIA_API_KEY)
+    3. Novita AI / Fish Audio S1 (NOVITA_API_KEY / FISH_AUDIO_API_KEY)
     """
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_model = os.getenv("OPENROUTER_TTS_MODEL", "openai/gpt-4o-mini-tts-2025-12-15").strip()
+    openrouter_voice = os.getenv("OPENROUTER_TTS_VOICE", "alloy").strip()
     cartesia_key = os.getenv("CARTESIA_API_KEY", "").strip()
     novita_key = os.getenv("NOVITA_API_KEY", "").strip() or os.getenv("FISH_AUDIO_API_KEY", "").strip()
     novita_ref_id = os.getenv("FISH_AUDIO_REFERENCE_ID", "").strip() or None
-    tts_pref = (provider_preference or os.getenv("TTS_PROVIDER", "cartesia")).strip().lower()
 
-    if (tts_pref in ("novita", "fish", "fish_audio") or not cartesia_key) and novita_key:
-        logger.info("Initializing Novita Fish Audio TTS as TTS Provider", model="s1")
-        return FishAudioTTSService(
-            api_key=novita_key,
-            reference_id=novita_ref_id,
-            sample_rate=16000,
+    providers = []
+
+    if openrouter_key:
+        logger.info(f"Adding OpenRouter TTS to provider chain [model={openrouter_model}, voice={openrouter_voice}]")
+        providers.append(
+            OpenRouterTTSService(
+                api_key=openrouter_key,
+                model=openrouter_model,
+                voice=openrouter_voice,
+                response_format="pcm",
+                sample_rate=24000,
+            )
         )
-    elif cartesia_key:
-        logger.info("Initializing Cartesia Sonic TTS as TTS Provider")
-        return CartesiaTTSService(
-            api_key=cartesia_key,
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"),
+
+    if cartesia_key:
+        logger.info("Adding Cartesia Sonic TTS to provider chain")
+        providers.append(
+            CartesiaTTSService(
+                api_key=cartesia_key,
+                voice_id=os.getenv("CARTESIA_VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"),
+            )
         )
-    elif novita_key:
-        logger.info("Initializing Novita Fish Audio TTS fallback", model="s1")
-        return FishAudioTTSService(
-            api_key=novita_key,
-            reference_id=novita_ref_id,
-            sample_rate=16000,
+
+    if novita_key:
+        logger.info("Adding Novita Fish Audio TTS to provider chain (model=s1)")
+        providers.append(
+            FishAudioTTSService(
+                api_key=novita_key,
+                reference_id=novita_ref_id,
+                sample_rate=16000,
+            )
         )
-    else:
+
+    if not providers:
         raise RuntimeError(
-            "No usable TTS provider is configured. One of CARTESIA_API_KEY or NOVITA_API_KEY must be set."
+            "No usable TTS provider is configured. One of OPENROUTER_API_KEY, CARTESIA_API_KEY, or NOVITA_API_KEY must be set."
         )
+
+    if len(providers) == 1:
+        return providers[0]
+
+    logger.info(f"Configured resilient FallbackTTSService with {len(providers)} providers")
+    return FallbackTTSService(providers=providers, sample_rate=24000)
 
 
 # ==============================================================================

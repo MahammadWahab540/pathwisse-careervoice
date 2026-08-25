@@ -7,7 +7,9 @@ interface UsePipecatVoiceOptions {
   targetRole: string;
   studentName?: string;
   onTranscript?: (text: string, sender: 'user' | 'qalam') => void;
+  onBotSpeakingChange?: (isSpeaking: boolean) => void;
   onError?: (error: string) => void;
+  onConnected?: () => void;
 }
 
 export function usePipecatVoice({
@@ -16,11 +18,14 @@ export function usePipecatVoice({
   targetRole,
   studentName = 'Candidate',
   onTranscript,
+  onBotSpeakingChange,
   onError,
+  onConnected,
 }: UsePipecatVoiceOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isBotSpeaking, setIsBotSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const callObjectRef = useRef<DailyCall | null>(null);
@@ -84,12 +89,15 @@ export function usePipecatVoice({
       callObject.on('joined-meeting', () => {
         setIsConnected(true);
         setIsConnecting(false);
+        onConnected?.();
       });
 
       callObject.on('left-meeting', () => {
         setIsConnected(false);
         setIsConnecting(false);
         setIsSpeaking(false);
+        setIsBotSpeaking(false);
+        onBotSpeakingChange?.(false);
       });
 
       callObject.on('app-message', (evt: any) => {
@@ -100,7 +108,9 @@ export function usePipecatVoice({
 
       callObject.on('participant-updated', (evt: any) => {
         if (evt?.participant && !evt.participant.local) {
-          setIsSpeaking(Boolean(evt.participant.audio));
+          const speaking = Boolean(evt.participant.audio);
+          setIsBotSpeaking(speaking);
+          onBotSpeakingChange?.(speaking);
         }
       });
 
@@ -122,7 +132,7 @@ export function usePipecatVoice({
       setIsConnecting(false);
       return false;
     }
-  }, [pipecatServerUrl, auditId, targetRole, studentName, onTranscript, onError]);
+  }, [pipecatServerUrl, auditId, targetRole, studentName, onTranscript, onBotSpeakingChange, onError, onConnected]);
 
   const endSession = useCallback(async () => {
     if (callObjectRef.current) {
@@ -137,6 +147,7 @@ export function usePipecatVoice({
     setIsConnected(false);
     setIsConnecting(false);
     setIsSpeaking(false);
+    setIsBotSpeaking(false);
     setRoomUrl(null);
   }, []);
 
@@ -158,6 +169,7 @@ export function usePipecatVoice({
     isConnected,
     isConnecting,
     isSpeaking,
+    isBotSpeaking,
     isMuted,
     roomUrl,
     startSession,
