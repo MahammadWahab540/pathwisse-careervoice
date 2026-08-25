@@ -142,42 +142,6 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
     };
   });
 
-  const [usePipecatEngine, setUsePipecatEngine] = useState(true);
-
-  const handlePipecatTranscript = (text: string, sender: 'user' | 'qalam') => {
-    if (sender === 'user') {
-      if (text.trim()) void submitAnswer(text.trim(), 'voice');
-    } else {
-      setMessages((prev) => {
-        // Prevent duplicate messages if already present
-        if (prev.some((m) => m.text === text)) return prev;
-        return [
-          ...prev,
-          {
-            id: `pipecat_${Date.now()}`,
-            sender: 'qalam',
-            text,
-            timestamp: Date.now(),
-            qalamState: 'SPEAKING',
-          },
-        ];
-      });
-    }
-  };
-
-  const pipecatVoice = usePipecatVoice({
-    auditId,
-    targetRole: role.title,
-    studentName: firstName || studentContext?.name || 'Candidate',
-    onTranscript: handlePipecatTranscript,
-    onBotSpeakingChange: (speaking) => {
-      setQalamState(speaking ? 'SPEAKING' : 'LISTENING');
-    },
-    onError: (err) => {
-      console.warn('Pipecat WebRTC session notice (activating direct browser voice engine):', err);
-      setUsePipecatEngine(false);
-    },
-  });
 
   const handleSpeechResult = (text: string) => {
     if (text.trim()) void submitAnswer(text.trim(), 'voice');
@@ -299,22 +263,18 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       };
       setMessages([initialMessage]);
       setQalamState('SPEAKING');
-      if (!pipecatConfigured || !usePipecatEngine) {
+      if (!pipecatConfigured) {
         speakText(initialPrompt, () => setQalamState('LISTENING'));
       } else {
-        pipecatVoice.startSession().catch((e) => {
-          console.warn('Pipecat session startup notice:', e);
-          setUsePipecatEngine(false);
-          speakText(initialPrompt, () => setQalamState('LISTENING'));
-        });
+        setQalamState('LISTENING');
       }
       trackEvent('career_audit_started', { auditId, role: role.id });
     }
     return () => {
       stopSpeaking();
-      pipecatVoice.endSession();
+      endPipecatSession();
     };
-  }, [auditId, pipecatConfigured, role.id, usePipecatEngine, voiceModeChecked]);
+  }, [auditId, endPipecatSession, pipecatConfigured, role.id, speakText, stopSpeaking, voiceModeChecked]);
 
   async function submitAnswer(
     answerText: string,

@@ -757,7 +757,6 @@ app.get('/api/colleges', async (_req, res) => {
     })),
   });
 });
-});
 
 app.post('/api/voice/session', async (req, res) => {
   try {
