@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Sparkles, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles, TrendingUp, X } from 'lucide-react';
 import type { AdaptiveEvidenceSubmission, QalamToolCall } from '../../ai/qalamTools';
 import { CompetencyBenchmarkCard } from './CompetencyBenchmarkCard';
 import { EvidenceUploadRequestCard } from './EvidenceUploadRequestCard';
@@ -29,6 +29,48 @@ function renderTool(call: QalamToolCall, onSubmitEvidence?: (submission: Adaptiv
       return <CompetencyBenchmarkCard data={call.args} />;
     case 'request_evidence_upload':
       return <EvidenceUploadRequestCard data={call.args} onSubmit={onSubmitEvidence} />;
+    case 'show_career_recommendations':
+      return (
+        <div className="space-y-3 text-left">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black text-[#0b111e]">Career directions</p>
+              <p className="text-[10px] font-semibold text-slate-500">
+                Confidence {call.args.recommendationConfidence}/100
+              </p>
+            </div>
+            {call.args.needsMoreDiscovery && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[9px] font-black text-amber-800">
+                More discovery
+              </span>
+            )}
+          </div>
+
+          {call.args.recommendations.map((recommendation) => (
+            <div key={recommendation.roleId} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase text-[#1f3861]">{recommendation.direction.replace('_', ' ')}</p>
+                  <h4 className="text-xs font-black text-[#0b111e]">{recommendation.roleTitle}</h4>
+                </div>
+                <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black text-emerald-700">
+                  <TrendingUp className="h-3 w-3" />
+                  {recommendation.fitScore}
+                </span>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-600">{recommendation.explanation}</p>
+              {recommendation.contradictingSignals.length > 0 && (
+                <p className="mt-2 text-[10px] font-semibold text-amber-800">{recommendation.contradictingSignals[0]}</p>
+              )}
+              {recommendation.nextValidationQuestion && (
+                <p className="mt-2 rounded-md bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                  {recommendation.nextValidationQuestion}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      );
   }
 }
 
@@ -39,6 +81,7 @@ const titleByTool: Record<QalamToolCall['name'], string> = {
   update_readiness_score: 'Readiness score',
   show_competency_benchmark: 'Role benchmark',
   request_evidence_upload: 'Evidence request',
+  show_career_recommendations: 'Career directions',
 };
 
 export const AdaptiveToolSurface: React.FC<AdaptiveToolSurfaceProps> = ({ calls, onDismiss, onSubmitEvidence }) => {

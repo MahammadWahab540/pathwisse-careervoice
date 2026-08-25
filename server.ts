@@ -20,6 +20,12 @@ import {
   type DiscoveryQuestionKey,
   type DiscoveryRole,
 } from './src/domain/careerDiscovery';
+import { extractCareerSignals } from './src/ai/careerSignalExtractor';
+import { retrieveCareerCandidates } from './src/domain/careerCandidateRetriever';
+import { buildCareerRecommendationsV2, calculateCareerFitV2, type CareerRecommendationV2 } from './src/domain/careerFitV2';
+import { normalizeCareerRoleGenome, type PublishedCareerRoleGenome } from './src/domain/careerRoleGenome';
+import { planNextBestCareerQuestion } from './src/domain/careerQuestionPlanner';
+import type { StudentCareerSignalProfile } from './src/domain/careerSignals';
 import { serverConfig } from './src/server/config';
 import {
   AiResponseValidationError,
@@ -414,6 +420,199 @@ async function persistRoleRecommendations(input: {
   const result = await supabase.from('career_role_recommendations').insert(rows);
   if (result.error) return { persisted: false, reason: result.error.message };
   return { persisted: true, sessionId };
+}
+
+async function loadPublishedCareerRoleGenomes(): Promise<PublishedCareerRoleGenome[]> {
+  const supabase = requireSupabase();
+  const rolesResult = await supabase
+    .from('career_roles')
+    .select('id,stream_id,title,category,description,demand_level,status')
+    .eq('status', 'published');
+  if (rolesResult.error) throw new PersistenceError('career_intelligence_roles_read', rolesResult.error.message);
+  const roles = (rolesResult.data || []) as Array<Record<string, unknown>>;
+  if (roles.length === 0) return [];
+
+  const roleIds = roles.map((role) => String(role.id));
+  const [genomeResult, skillResult] = await Promise.all([
+    supabase
+      .from('career_role_genomes')
+      .select('role_id,domains,preferred_interests,problem_types,work_styles,environments,preferred_evidence,prerequisites,anti_signals,adjacent_role_ids,transition_difficulty,market_demand_score,status')
+      .in('role_id', roleIds)
+      .eq('status', 'published'),
+    supabase
+      .from('career_role_skills')
+      .select('role_id,skill_name,required_level,weight')
+      .in('role_id', roleIds),
+  ]);
+  if (genomeResult.error) throw new PersistenceError('career_intelligence_genomes_read', genomeResult.error.message);
+  if (skillResult.error) throw new PersistenceError('career_intelligence_role_skills_read', skillResult.error.message);
+
+  const genomeByRole = new Map((genomeResult.data || []).map((genome: Record<string, unknown>) => [String(genome.role_id), genome]));
+  const skillsByRole = new Map<string, Array<Record<string, unknown>>>();
+  for (const skill of (skillResult.data || []) as Array<Record<string, unknown>>) {
+    const roleId = String(skill.role_id);
+    skillsByRole.set(roleId, [...(skillsByRole.get(roleId) || []), skill]);
+  }
+
+  return roles
+    .map((role): PublishedCareerRoleGenome | null => {
+      const genome = genomeByRole.get(String(role.id));
+      if (!genome) return null;
+      const normalized = normalizeCareerRoleGenome({
+        ...genome,
+        roleId: role.id,
+        title: role.title,
+        requiredSkills: (skillsByRole.get(String(role.id)) || []).map((skill) => ({
+          skill: String(skill.skill_name || ''),
+          weight: Number(skill.weight ?? 0.5),
+          minimumLevel: /advanced/i.test(String(skill.required_level || '')) ? 80 : /beginner/i.test(String(skill.required_level || '')) ? 45 : 65,
+        })),
+      });
+      if (!normalized) return null;
+      return {
+        ...normalized,
+        category: optionalString(role.category),
+        description: optionalString(role.description),
+        demandLevel: optionalString(role.demand_level),
+        streamId: optionalString(role.stream_id),
+        status: 'published' as const,
+      };
+    })
+    .filter((role): role is PublishedCareerRoleGenome => role !== null);
+}
+
+async function persistCareerDiscoverySignals(input: {
+  studentId?: string;
+  discoverySessionId?: string;
+  profile: StudentCareerSignalProfile;
+}) {
+  const supabase = getSupabase();
+  if (!supabase || !input.studentId || !UUID_RE.test(input.studentId)) return;
+  const discoverySessionId = input.discoverySessionId && UUID_RE.test(input.discoverySessionId) ? input.discoverySessionId : null;
+  const signalRows = [
+    ...input.profile.interests.map((signal) => ({ signal_type: 'INTEREST', signal })),
+    ...input.profile.demonstratedSkills.map((signal) => ({ signal_type: 'SKILL', signal })),
+    ...input.profile.claimedSkills.map((signal) => ({ signal_type: 'SKILL', signal })),
+    ...input.profile.projects.map((signal) => ({ signal_type: 'PROJECT', signal })),
+    ...input.profile.internships.map((signal) => ({ signal_type: 'PROJECT', signal })),
+    ...input.profile.strengths.map((signal) => ({ signal_type: 'STRENGTH', signal })),
+    ...input.profile.workPreferences.map((signal) => ({ signal_type: 'WORK_PREFERENCE', signal })),
+    ...input.profile.dislikedWork.map((signal) => ({ signal_type: 'DISLIKE', signal })),
+    ...input.profile.problemSolvingStyle.map((signal) => ({ signal_type: 'PROBLEM_STYLE', signal })),
+    ...input.profile.preferredEnvironment.map((signal) => ({ signal_type: 'ENVIRONMENT', signal })),
+    ...input.profile.constraints.map((signal) => ({ signal_type: 'CONSTRAINT', signal })),
+  ].map((row) => ({
+    user_id: input.studentId,
+    discovery_session_id: discoverySessionId,
+    signal_type: row.signal_type,
+    signal_name: row.signal.name,
+    confidence: row.signal.confidence,
+    evidence_level: row.signal.evidenceLevel,
+    source_text: row.signal.source,
+    source_type: 'career_intelligence_v2',
+  }));
+  if (signalRows.length === 0) return;
+  const result = await supabase.from('career_discovery_signals').insert(signalRows);
+  if (result.error) console.warn('career_discovery_signal_persist_notice', result.error.message);
+}
+
+async function persistCareerRecommendationRun(input: {
+  studentId?: string;
+  discoverySessionId?: string;
+  candidateRoleIds: string[];
+  signalProfile: StudentCareerSignalProfile;
+  recommendations: CareerRecommendationV2[];
+  processingTimeMs: number;
+  recommendationConfidence: number;
+  needsMoreDiscovery: boolean;
+}) {
+  const supabase = getSupabase();
+  if (!supabase || !input.studentId || !UUID_RE.test(input.studentId)) return { persisted: false, reason: 'missing_privileged_user_context' };
+  const result = await supabase
+    .from('career_recommendation_runs')
+    .insert({
+      user_id: input.studentId,
+      discovery_session_id: input.discoverySessionId && UUID_RE.test(input.discoverySessionId) ? input.discoverySessionId : null,
+      engine_version: 'career-intelligence:v2',
+      candidate_role_ids: input.candidateRoleIds,
+      input_signal_snapshot: input.signalProfile,
+      result_snapshot: input.recommendations,
+      processing_time_ms: input.processingTimeMs,
+      top_role_id: input.recommendations[0]?.roleId || null,
+      recommendation_confidence: input.recommendationConfidence,
+      needs_more_discovery: input.needsMoreDiscovery,
+    })
+    .select('id')
+    .single();
+  if (result.error) return { persisted: false, reason: result.error.message };
+  return { persisted: true, runId: result.data.id as string };
+}
+
+async function buildCareerIntelligenceV2(input: {
+  studentId?: string;
+  discoverySessionId?: string;
+  branch?: string;
+  academicYear?: number | null;
+  careerIntent?: string;
+  discoveryProfile?: CareerDiscoveryProfile;
+}) {
+  const started = Date.now();
+  const roles = await loadPublishedCareerRoleGenomes();
+  const loaded = await loadDiscoveryProfile(input.studentId, {
+    branch: input.branch,
+    academicYear: input.academicYear || undefined,
+    careerIntent: input.careerIntent,
+  });
+  const profile = {
+    ...(input.discoveryProfile || {}),
+    ...loaded.careerDiscoveryProfile,
+  } as Record<string, unknown>;
+  const messages = input.discoverySessionId && UUID_RE.test(input.discoverySessionId) && getSupabase()
+    ? await loadAuditMessages(requireSupabase(), input.discoverySessionId).catch(() => [])
+    : [];
+  const signalProfile = await extractCareerSignals({
+    studentProfile: profile,
+    branch: loaded.branch || input.branch,
+    academicYear: loaded.academicYear || input.academicYear || undefined,
+    careerIntent: loaded.careerIntent || input.careerIntent,
+    discoveryAnswers: Array.isArray(profile.answers) ? profile.answers as Array<{ questionKey?: string; answer?: string }> : [],
+    projectDescriptions: Array.isArray(profile.projects) ? profile.projects.map(String) : [],
+    conversationText: messages.map((message: any) => String(message.content || '')),
+  });
+  const candidates = retrieveCareerCandidates(signalProfile, roles);
+  const fitResults = candidates.map((role) => calculateCareerFitV2(signalProfile, role));
+  const nextQuestion = planNextBestCareerQuestion(fitResults);
+  const recommendations = buildCareerRecommendationsV2(fitResults);
+  const top = fitResults.sort((a, b) => b.fitScore - a.fitScore)[0];
+  const recommendationConfidence = Math.max(0, Math.round(recommendations.reduce((sum, item) => sum + item.confidenceScore, 0) / Math.max(1, recommendations.length)));
+  const needsMoreDiscovery = !top || top.confidenceScore < 35 || Boolean(nextQuestion);
+  const enrichedRecommendations = recommendations.map((recommendation) => ({
+    ...recommendation,
+    ...(nextQuestion && nextQuestion.roleIds.includes(recommendation.roleId) ? { nextValidationQuestion: nextQuestion.prompt } : {}),
+  }));
+  const processingTimeMs = Date.now() - started;
+  await persistCareerDiscoverySignals({ studentId: input.studentId, discoverySessionId: input.discoverySessionId, profile: signalProfile });
+  const persistence = await persistCareerRecommendationRun({
+    studentId: input.studentId,
+    discoverySessionId: input.discoverySessionId,
+    candidateRoleIds: candidates.map((role) => role.roleId),
+    signalProfile,
+    recommendations: enrichedRecommendations,
+    processingTimeMs,
+    recommendationConfidence,
+    needsMoreDiscovery,
+  });
+  return {
+    status: needsMoreDiscovery ? 'NEEDS_MORE_DISCOVERY' as const : 'READY' as const,
+    processingTimeMs,
+    needsMoreDiscovery,
+    recommendationConfidence,
+    recommendations: needsMoreDiscovery && recommendationConfidence < 35 ? [] : enrichedRecommendations,
+    nextQuestion: needsMoreDiscovery ? nextQuestion : null,
+    candidateRoleIds: candidates.map((role) => role.roleId),
+    signalProfile,
+    persistence,
+  };
 }
 
 // Gemini Live WebSocket bridge with tool calling
@@ -870,6 +1069,46 @@ app.post('/api/roles/recommendations', async (req, res) => {
       skills: [...new Set([...(requestProfile.skills || []), ...(loaded.careerDiscoveryProfile.skills || []), ...knownSkills])],
       explicitCareerIntent: loaded.careerDiscoveryProfile.explicitCareerIntent || requestProfile.explicitCareerIntent || careerIntent,
     };
+
+    const v2 = await buildCareerIntelligenceV2({
+      studentId,
+      discoverySessionId: optionalString(req.body?.sessionId),
+      branch: loaded.branch || branch,
+      academicYear: loaded.academicYear || academicYear || undefined,
+      careerIntent: loaded.careerIntent || careerIntent,
+      discoveryProfile: mergedProfile,
+    });
+    if (v2.recommendations.length > 0) {
+      const roleById = new Map(roles.map((role) => [role.id, role]));
+      return res.json(v2.recommendations.map((recommendation) => {
+        const role = roleById.get(recommendation.roleId);
+        return {
+          id: recommendation.roleId,
+          streamId: role?.streamId || streamId || '',
+          title: recommendation.roleTitle,
+          category: role?.category || '',
+          description: role?.description || recommendation.explanation,
+          demandLevel: role?.demandLevel || 'Moderate',
+          keySkills: role?.skills || [],
+          status: role?.status || 'published',
+          matchType: recommendation.direction,
+          fitReason: recommendation.explanation,
+          matchScore: recommendation.fitScore,
+          fitBand: recommendation.confidenceScore >= 70 ? 'Strong Fit' : recommendation.confidenceScore >= 50 ? 'Good Fit' : 'Exploratory Fit',
+          fitReasons: [
+            recommendation.explanation,
+            ...recommendation.supportingSignals,
+            ...recommendation.contradictingSignals,
+          ].filter(Boolean),
+          recommendationDirection: recommendation.direction,
+          confidenceScore: recommendation.confidenceScore,
+          needsMoreDiscovery: v2.needsMoreDiscovery,
+          nextValidationQuestion: recommendation.nextValidationQuestion,
+          persistence: v2.persistence,
+        };
+      }));
+    }
+
     const recommendations = buildDiscoveryRecommendations(
       {
         branch: loaded.branch || branch,
@@ -907,6 +1146,35 @@ app.post('/api/roles/recommendations', async (req, res) => {
     );
   } catch (error) {
     return handleRouteError(res, error, 'role_recommendations');
+  }
+});
+
+app.post('/api/career-intelligence/recommend', async (req, res) => {
+  try {
+    const studentId = requiredString(req.body?.studentId, 'studentId');
+    const discoverySessionId = requiredString(req.body?.discoverySessionId, 'discoverySessionId');
+    const result = await buildCareerIntelligenceV2({
+      studentId,
+      discoverySessionId,
+      branch: optionalString(req.body?.branch),
+      academicYear: normalizedAcademicYear(req.body?.academicYear),
+      careerIntent: optionalString(req.body?.careerIntent),
+      discoveryProfile: isRecord(req.body?.discoveryProfile)
+        ? (req.body.discoveryProfile as CareerDiscoveryProfile)
+        : undefined,
+    });
+    return res.json({
+      status: result.status,
+      processingTimeMs: result.processingTimeMs,
+      needsMoreDiscovery: result.needsMoreDiscovery,
+      recommendationConfidence: result.recommendationConfidence,
+      recommendations: result.status === 'READY' ? result.recommendations : [],
+      ...(result.nextQuestion ? { nextQuestion: result.nextQuestion } : {}),
+      persistence: result.persistence,
+    });
+  } catch (error) {
+    if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
+    return handleRouteError(res, error, 'career_intelligence_recommend');
   }
 });
 
