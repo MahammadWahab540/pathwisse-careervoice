@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 import type { SkillSignalInput } from '../domain/careerAudit';
 
 export class PersistenceError extends Error {
@@ -24,6 +25,13 @@ export interface AuditSessionRow {
   target_role_id: string | null;
   status: string;
   context: Record<string, unknown>;
+  attempt_id?: string | null;
+  current_stage?: string | null;
+  current_competency_id?: string | null;
+  current_question_id?: string | null;
+  follow_up_count?: number | null;
+  progress?: Record<string, unknown> | null;
+  state_version?: number | null;
 }
 
 export async function createOrResumeAuditSession(
@@ -38,7 +46,7 @@ export async function createOrResumeAuditSession(
   if (input.idempotencyKey) {
     const existing = await supabase
       .from('audit_sessions')
-      .select('id,user_id,target_role_id,status,context')
+      .select('id,user_id,target_role_id,status,context,attempt_id,current_stage,current_competency_id,current_question_id,follow_up_count,progress,state_version')
       .eq('user_id', input.studentId)
       .eq('idempotency_key', input.idempotencyKey)
       .maybeSingle();
@@ -53,12 +61,19 @@ export async function createOrResumeAuditSession(
       target_role_id: input.targetRoleId,
       status: 'created',
       current_step: 0,
+      attempt_id: randomUUID(),
+      current_stage: null,
+      current_competency_id: null,
+      current_question_id: null,
+      follow_up_count: 0,
+      progress: { completed: 0, total: 0, percentage: 0 },
+      state_version: 0,
       idempotency_key: input.idempotencyKey || null,
       context: input.context || {},
       started_at: new Date().toISOString(),
       last_activity_at: new Date().toISOString(),
     })
-    .select('id,user_id,target_role_id,status,context')
+    .select('id,user_id,target_role_id,status,context,attempt_id,current_stage,current_competency_id,current_question_id,follow_up_count,progress,state_version')
     .single();
 
   if (inserted.error || !inserted.data) fail('audit_session_insert', inserted.error);
@@ -68,7 +83,7 @@ export async function createOrResumeAuditSession(
 export async function getAuditSession(supabase: SupabaseClient, auditId: string): Promise<AuditSessionRow> {
   const result = await supabase
     .from('audit_sessions')
-    .select('id,user_id,target_role_id,status,context')
+    .select('id,user_id,target_role_id,status,context,attempt_id,current_stage,current_competency_id,current_question_id,follow_up_count,progress,state_version')
     .eq('id', auditId)
     .maybeSingle();
   if (result.error) fail('audit_session_read', result.error);

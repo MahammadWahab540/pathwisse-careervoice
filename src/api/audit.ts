@@ -23,6 +23,9 @@ export interface SendQalamChatInput {
   targetRole: string;
   currentStage: string;
   nextQuestion?: string;
+  stateVersion?: number;
+  action?: 'ANSWER' | 'SKIP';
+  explicitSkip?: boolean;
 }
 
 export interface SubmitSkillSignalInput {
@@ -68,7 +71,7 @@ export async function sendQalamChat(input: SendQalamChatInput): Promise<QalamCha
 
 export async function submitSkillSignal(input: SubmitSkillSignalInput): Promise<{
   success: true;
-  signalId: string;
+  signalId: string | null;
   evidenceId: string;
 }> {
   return api.post('/api/audit/evidence/signal', input);

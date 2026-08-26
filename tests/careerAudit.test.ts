@@ -4,6 +4,8 @@ import {
   calculateRoleFit,
   calculateSkillGap,
   calculateSkillScore,
+  decideAuditTransition,
+  isNoExperienceAnswer,
   parseSkillSignalInput,
   readinessStatusForScore,
 } from '../src/domain/careerAudit';
@@ -114,4 +116,161 @@ test('role fit changes with student evidence instead of card position', () => {
 
   assert.ok(backendProfile.matchScore > designProfile.matchScore);
   assert.ok(backendProfile.fitReasons.length > 0);
+});
+
+const transitionStages = [
+  {
+    stageId: 'clarity_stage',
+    competencyId: 'role_clarity',
+    questionId: 'q_clarity_1',
+    questionText: 'Why does this role interest you?',
+  },
+  {
+    stageId: 'technical_core_stage',
+    competencyId: 'technical_core',
+    questionId: 'q_technical_1',
+    questionText: 'Tell me about the most relevant project you handled.',
+  },
+  {
+    stageId: 'execution_stage',
+    competencyId: 'execution',
+    questionId: 'q_execution_1',
+    questionText: 'How much time can you dedicate weekly?',
+  },
+];
+
+test('audit transition advances for Strong and Moderate evidence', () => {
+  const strong = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'clarity_stage',
+    currentCompetencyId: 'role_clarity',
+    currentQuestionId: 'q_clarity_1',
+    stateVersion: 4,
+    expectedStateVersion: 4,
+    evidenceStrength: 'Strong',
+    studentAnswer: 'I researched this role and completed a relevant project.',
+  });
+
+  assert.equal(strong.action, 'ADVANCE');
+  assert.equal(strong.nextStage, 'technical_core_stage');
+  assert.equal(strong.nextCompetencyId, 'technical_core');
+  assert.equal(strong.followUpCount, 0);
+
+  const moderate = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'technical_core_stage',
+    currentCompetencyId: 'technical_core',
+    currentQuestionId: 'q_technical_1',
+    stateVersion: 5,
+    expectedStateVersion: 5,
+    evidenceStrength: 'Moderate',
+    studentAnswer: 'I built part of the dashboard and can explain the API flow.',
+  });
+
+  assert.equal(moderate.action, 'ADVANCE');
+  assert.equal(moderate.nextStage, 'execution_stage');
+});
+
+test('audit transition allows exactly one weak follow-up then advances', () => {
+  const firstWeak = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'technical_core_stage',
+    currentCompetencyId: 'technical_core',
+    currentQuestionId: 'q_technical_1',
+    stateVersion: 2,
+    expectedStateVersion: 2,
+    evidenceStrength: 'Weak',
+    followUpCount: 0,
+    studentAnswer: 'I know basics.',
+    followUpQuestion: 'What did you personally build?',
+  });
+
+  assert.equal(firstWeak.action, 'FOLLOW_UP');
+  assert.equal(firstWeak.nextStage, 'technical_core_stage');
+  assert.equal(firstWeak.followUpCount, 1);
+
+  const secondWeak = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'technical_core_stage',
+    currentCompetencyId: 'technical_core',
+    currentQuestionId: 'q_technical_1',
+    stateVersion: 3,
+    expectedStateVersion: 3,
+    evidenceStrength: 'Weak',
+    followUpCount: 1,
+    studentAnswer: 'Still only basics.',
+    followUpQuestion: 'What did you personally build?',
+  });
+
+  assert.equal(secondWeak.action, 'ADVANCE');
+  assert.equal(secondWeak.nextStage, 'execution_stage');
+  assert.equal(secondWeak.followUpCount, 0);
+});
+
+test('no-experience answers and explicit skip advance without follow-up', () => {
+  assert.equal(isNoExperienceAnswer("I don't have experience"), true);
+  assert.equal(isNoExperienceAnswer('ask me something else'), true);
+
+  const noExperience = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'technical_core_stage',
+    currentCompetencyId: 'technical_core',
+    currentQuestionId: 'q_technical_1',
+    stateVersion: 7,
+    expectedStateVersion: 7,
+    evidenceStrength: 'Weak',
+    studentAnswer: "I haven't done this yet",
+    followUpQuestion: 'Can you clarify?',
+  });
+
+  assert.equal(noExperience.evidenceStrength, 'None');
+  assert.equal(noExperience.action, 'ADVANCE');
+  assert.equal(noExperience.nextStage, 'execution_stage');
+
+  const skipped = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'technical_core_stage',
+    currentCompetencyId: 'technical_core',
+    currentQuestionId: 'q_technical_1',
+    stateVersion: 8,
+    expectedStateVersion: 8,
+    evidenceStrength: 'Strong',
+    studentAnswer: 'skip',
+    explicitSkip: true,
+    followUpQuestion: 'Can you clarify?',
+  });
+
+  assert.equal(skipped.evidenceStrength, 'None');
+  assert.equal(skipped.action, 'SKIP');
+  assert.equal(skipped.nextStage, 'execution_stage');
+});
+
+test('audit transition rejects stale state and never regresses to a prior stage', () => {
+  assert.throws(() =>
+    decideAuditTransition({
+      stages: transitionStages,
+      currentStageId: 'technical_core_stage',
+      currentCompetencyId: 'technical_core',
+      currentQuestionId: 'q_technical_1',
+      stateVersion: 3,
+      expectedStateVersion: 2,
+      evidenceStrength: 'Strong',
+      studentAnswer: 'I built a project.',
+    })
+  );
+
+  const result = decideAuditTransition({
+    stages: transitionStages,
+    currentStageId: 'execution_stage',
+    currentCompetencyId: 'execution',
+    currentQuestionId: 'q_execution_1',
+    stateVersion: 4,
+    expectedStateVersion: 4,
+    evidenceStrength: 'Strong',
+    studentAnswer: 'I can dedicate six hours weekly.',
+    requestedNextStageId: 'clarity_stage',
+  });
+
+  assert.equal(result.action, 'COMPLETE');
+  assert.equal(result.nextStage, 'execution_stage');
 });

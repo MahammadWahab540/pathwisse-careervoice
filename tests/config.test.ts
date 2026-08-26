@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildServerConfig } from '../src/server/config';
+import { buildReadinessHealth, buildServerConfig } from '../src/server/config';
 
 test('server config centralizes production Gemini models', () => {
   const config = buildServerConfig({
@@ -32,6 +32,23 @@ test('health flags reflect required server secrets without exposing them', () =>
   assert.equal(config.metaWhatsappOtpConfigured, false);
   assert.equal('supabaseServiceRoleKey' in config.publicHealth, false);
   assert.equal('geminiApiKey' in config.publicHealth, false);
+});
+
+test('readiness health reports missing critical dependencies without secrets', () => {
+  const ready = buildReadinessHealth(buildServerConfig({
+    GEMINI_API_KEY: 'gemini-key',
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+  }));
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.checks.supabase.configured, true);
+  assert.equal(ready.checks.ai.configured, true);
+  assert.equal(JSON.stringify(ready).includes('service-role'), false);
+
+  const missing = buildReadinessHealth(buildServerConfig({}));
+  assert.equal(missing.status, 'not_ready');
+  assert.equal(missing.checks.supabase.configured, false);
+  assert.equal(missing.checks.ai.configured, false);
 });
 
 test('Meta WhatsApp OTP accepts Voice and DEV-style env names', () => {

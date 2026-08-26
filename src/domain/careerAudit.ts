@@ -116,6 +116,49 @@ export interface RoleFitResult {
   fitReasons: string[];
 }
 
+export type AuditTransitionAction = 'FOLLOW_UP' | 'ADVANCE' | 'SKIP' | 'COMPLETE';
+
+export interface AuditStageDefinition {
+  stageId: string;
+  competencyId: string;
+  questionId: string;
+  questionText: string;
+}
+
+export interface AuditTransitionInput {
+  stages: AuditStageDefinition[];
+  currentStageId: string;
+  currentCompetencyId: string;
+  currentQuestionId: string;
+  stateVersion: number;
+  expectedStateVersion?: number;
+  evidenceStrength: EvidenceStrength;
+  studentAnswer: string;
+  followUpCount?: number;
+  followUpQuestion?: string;
+  explicitSkip?: boolean;
+  requestedNextStageId?: string;
+}
+
+export interface AuditTransitionResult {
+  evaluatedStage: string;
+  evaluatedCompetencyId: string;
+  evaluatedQuestionId: string;
+  evidenceStrength: EvidenceStrength;
+  action: AuditTransitionAction;
+  followUpCount: number;
+  nextStage: string;
+  nextCompetencyId: string;
+  nextQuestionId: string;
+  questionText: string;
+  stateVersion: number;
+  progress: {
+    completed: number;
+    total: number;
+    percentage: number;
+  };
+}
+
 const EVIDENCE_STRENGTHS: EvidenceStrength[] = ['Strong', 'Moderate', 'Weak', 'None'];
 const EVIDENCE_SOURCES: EvidenceSource[] = [
   'voice_probe',
@@ -141,8 +184,114 @@ const EVIDENCE_MULTIPLIER: Record<EvidenceStrength, number> = {
   None: 0,
 };
 
+const NO_EXPERIENCE_PATTERNS = [
+  /\bno\b/i,
+  /\bnope\b/i,
+  /\bnothing\b/i,
+  /\bnone\b/i,
+  /\bskip\b/i,
+  /\bask (?:me )?(?:another|something else)\b/i,
+  /\bask me something else\b/i,
+  /\bi (?:have not|haven't|did not|didn't) (?:done|built|worked|made|created|handled)\b/i,
+  /\bi (?:do not|don't) have (?:any )?(?:experience|project|projects)\b/i,
+  /\bi (?:do not|don't) know\b/i,
+  /\bnot done yet\b/i,
+  /\bno project\b/i,
+];
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function isNoExperienceAnswer(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  return NO_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function validStageIndex(stages: AuditStageDefinition[], stageId: string): number {
+  const index = stages.findIndex((stage) => stage.stageId === stageId);
+  if (index < 0) throw new Error(`Unknown audit stage: ${stageId}`);
+  return index;
+}
+
+function progressFor(index: number, total: number, action: AuditTransitionAction) {
+  const completed = action === 'COMPLETE' ? total : Math.min(total, action === 'FOLLOW_UP' ? index : index + 1);
+  return {
+    completed,
+    total,
+    percentage: total === 0 ? 0 : Math.round((completed / total) * 100),
+  };
+}
+
+export function decideAuditTransition(input: AuditTransitionInput): AuditTransitionResult {
+  if (!Array.isArray(input.stages) || input.stages.length === 0) {
+    throw new Error('Audit transition requires at least one stage.');
+  }
+  if (
+    input.expectedStateVersion !== undefined &&
+    Number.isFinite(input.expectedStateVersion) &&
+    input.expectedStateVersion !== input.stateVersion
+  ) {
+    throw new Error('STALE_AUDIT_STATE');
+  }
+
+  const currentIndex = validStageIndex(input.stages, input.currentStageId);
+  const current = input.stages[currentIndex];
+  const last = input.stages[input.stages.length - 1];
+  const noExperience = isNoExperienceAnswer(input.studentAnswer);
+  const evidenceStrength: EvidenceStrength = input.explicitSkip || noExperience ? 'None' : input.evidenceStrength;
+  const priorFollowUps = Math.max(0, Math.floor(input.followUpCount || 0));
+
+  let action: AuditTransitionAction;
+  if (input.explicitSkip) {
+    action = 'SKIP';
+  } else if (currentIndex === input.stages.length - 1 && (evidenceStrength === 'Strong' || evidenceStrength === 'Moderate' || noExperience || priorFollowUps > 0)) {
+    action = 'COMPLETE';
+  } else if (evidenceStrength === 'Strong' || evidenceStrength === 'Moderate' || noExperience) {
+    action = currentIndex === input.stages.length - 1 ? 'COMPLETE' : 'ADVANCE';
+  } else if ((evidenceStrength === 'Weak' || evidenceStrength === 'None') && priorFollowUps < 1 && !noExperience) {
+    action = 'FOLLOW_UP';
+  } else {
+    action = currentIndex === input.stages.length - 1 ? 'COMPLETE' : 'ADVANCE';
+  }
+
+  let nextIndex = currentIndex;
+  if (action === 'ADVANCE' || action === 'SKIP') {
+    nextIndex = Math.min(currentIndex + 1, input.stages.length - 1);
+    if (currentIndex === input.stages.length - 1) action = 'COMPLETE';
+  }
+  if (action === 'COMPLETE') nextIndex = input.stages.length - 1;
+
+  if (input.requestedNextStageId) {
+    const requestedIndex = validStageIndex(input.stages, input.requestedNextStageId);
+    nextIndex = Math.max(nextIndex, requestedIndex, currentIndex);
+    if (nextIndex === currentIndex && currentIndex === input.stages.length - 1) action = 'COMPLETE';
+  }
+
+  const next = input.stages[nextIndex] || last;
+  const nextFollowUpCount = action === 'FOLLOW_UP' ? priorFollowUps + 1 : 0;
+  const questionText =
+    action === 'FOLLOW_UP'
+      ? input.followUpQuestion?.trim() || current.questionText
+      : action === 'COMPLETE'
+      ? 'Great. I have collected enough evidence to generate your readiness report.'
+      : next.questionText;
+
+  return {
+    evaluatedStage: current.stageId,
+    evaluatedCompetencyId: input.currentCompetencyId || current.competencyId,
+    evaluatedQuestionId: input.currentQuestionId || current.questionId,
+    evidenceStrength,
+    action,
+    followUpCount: nextFollowUpCount,
+    nextStage: next.stageId,
+    nextCompetencyId: next.competencyId,
+    nextQuestionId: next.questionId,
+    questionText,
+    stateVersion: input.stateVersion + 1,
+    progress: progressFor(currentIndex, input.stages.length, action),
+  };
 }
 
 function requiredString(value: unknown, field: string): string {

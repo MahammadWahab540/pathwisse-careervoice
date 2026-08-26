@@ -6,6 +6,21 @@ export interface AuditSessionDto {
   studentId: string;
   targetRoleId: string;
   status: string;
+  auditState?: {
+    currentStage?: string;
+    currentCompetencyId?: string;
+    currentQuestionId?: string;
+    followUpCount?: number;
+    stateVersion?: number;
+    progress?: {
+      completed: number;
+      total: number;
+      percentage: number;
+    };
+    lastAction?: string;
+    lastEvaluatedStage?: string;
+    lastEvidenceStrength?: EvidenceStrength;
+  } | null;
   targetRole?: {
     id: string;
     title: string;
@@ -49,6 +64,21 @@ export interface QalamChatResponseDto {
   needsFollowUp: boolean;
   followUpQuestion: string;
   nextAction?: 'probe' | 'challenge' | 'scenario' | 'switch_skill' | 'request_evidence' | 'complete';
+  evaluatedStage?: string;
+  evaluatedCompetencyId?: string;
+  evaluatedQuestionId?: string;
+  action?: 'FOLLOW_UP' | 'ADVANCE' | 'SKIP' | 'COMPLETE';
+  followUpCount?: number;
+  nextStage?: string;
+  nextCompetencyId?: string;
+  nextQuestionId?: string;
+  questionText?: string;
+  stateVersion?: number;
+  progress?: {
+    completed: number;
+    total: number;
+    percentage: number;
+  };
   extractedSkills: Array<{
     skillName: string;
     extractedLevel: string;
