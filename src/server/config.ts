@@ -49,6 +49,16 @@ export interface ServerConfig {
   };
 }
 
+export interface ReadinessHealth {
+  status: 'ready' | 'not_ready';
+  checks: {
+    supabase: { configured: boolean };
+    ai: { configured: boolean; provider: 'gemini' | 'openrouter' | 'none' };
+    voice: { configured: boolean; engine: string };
+    whatsappOtp: { configured: boolean };
+  };
+}
+
 function clean(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -129,6 +139,22 @@ export function buildServerConfig(env: ServerEnvironment = process.env): ServerC
       geminiChatModel,
       geminiEvaluationModel,
       openrouterLlmModel,
+    },
+  };
+}
+
+export function buildReadinessHealth(config: ServerConfig): ReadinessHealth {
+  const aiProvider = config.geminiConfigured ? 'gemini' : config.openrouterConfigured ? 'openrouter' : 'none';
+  const aiConfigured = aiProvider !== 'none';
+  const ready = config.supabaseConfigured && aiConfigured;
+
+  return {
+    status: ready ? 'ready' : 'not_ready',
+    checks: {
+      supabase: { configured: config.supabaseConfigured },
+      ai: { configured: aiConfigured, provider: aiProvider },
+      voice: { configured: config.openrouterConfigured || config.pipecatConfigured, engine: config.publicHealth.voiceEngine },
+      whatsappOtp: { configured: config.metaWhatsappOtpConfigured },
     },
   };
 }

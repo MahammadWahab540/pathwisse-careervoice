@@ -15,6 +15,7 @@ export const EvidenceCoverageList: React.FC<EvidenceCoverageListProps> = ({
   className = '',
 }) => {
   if (!items || items.length === 0) return null;
+  const coveredCount = items.filter((i) => i.evidenceStrength === 'Strong' || i.evidenceStrength === 'Moderate').length;
 
   return (
     <div className={`rounded-2xl bg-white border border-slate-200/80 p-3.5 space-y-2.5 shadow-2xs ${className}`}>
@@ -24,7 +25,7 @@ export const EvidenceCoverageList: React.FC<EvidenceCoverageListProps> = ({
           <span className="text-xs font-bold text-[#0b111e]">{title}</span>
         </div>
         <span className="text-[10px] font-mono text-slate-500 font-semibold">
-          {items.filter((i) => i.evidenceStrength !== 'None').length} / {items.length} verified
+          {coveredCount} / {items.length} verified
         </span>
       </div>
 

@@ -9,7 +9,10 @@ import { createServer as createViteServer } from 'vite';
 import { getSupabase, requireSupabase } from './src/lib/supabase';
 import {
   calculateRoleFit,
+  decideAuditTransition,
+  isNoExperienceAnswer,
   parseSkillSignalInput,
+  type AuditStageDefinition,
   type EvidenceStrength,
 } from './src/domain/careerAudit';
 import {
@@ -26,7 +29,7 @@ import { buildCareerRecommendationsV2, calculateCareerFitV2, type CareerRecommen
 import { normalizeCareerRoleGenome, type PublishedCareerRoleGenome } from './src/domain/careerRoleGenome';
 import { planNextBestCareerQuestion } from './src/domain/careerQuestionPlanner';
 import type { StudentCareerSignalProfile } from './src/domain/careerSignals';
-import { serverConfig } from './src/server/config';
+import { buildReadinessHealth, serverConfig } from './src/server/config';
 import {
   AiResponseValidationError,
   AiUnavailableError,
@@ -353,6 +356,73 @@ function mapDiscoveryRole(role: ReturnType<typeof mapRole>): DiscoveryRole {
     demandLevel: String(role.demandLevel || ''),
     status: String(role.status || 'published'),
     skills: Array.isArray(role.keySkills) ? role.keySkills.map(String) : [],
+  };
+}
+
+function normalizeCoreCompetencies(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function buildRoleAuditStages(input: {
+  roleTitle: string;
+  roleSkills?: string[];
+  competencyModel?: Record<string, unknown> | null;
+}): AuditStageDefinition[] {
+  const coreCompetencies = normalizeCoreCompetencies(input.competencyModel?.core_competencies);
+  const roleSkills = (input.roleSkills || []).filter(Boolean);
+  const competencyStages = (coreCompetencies.length > 0 ? coreCompetencies : roleSkills.map((skillName) => ({
+    skillName,
+    category: 'Core Competency',
+    description: `Explain your practical experience with ${skillName}.`,
+  }))).slice(0, 4);
+
+  const stages: AuditStageDefinition[] = [
+    {
+      stageId: 'role_clarity',
+      competencyId: 'role_clarity',
+      questionId: 'q_role_clarity',
+      questionText: `Why does ${input.roleTitle} interest you, and what do you think someone in this role does day to day?`,
+    },
+    ...competencyStages.map((competency, index) => {
+      const skillName = String(competency.skillName || competency.skill_name || `Competency ${index + 1}`);
+      const description = String(competency.description || skillName);
+      return {
+        stageId: `competency_${index + 1}`,
+        competencyId: String(competency.skillId || competency.skill_id || skillName.toLowerCase().replace(/[^a-z0-9]+/g, '_')),
+        questionId: `q_competency_${index + 1}`,
+        questionText: `For ${input.roleTitle}, tell me about your practical evidence for ${skillName}. What did you personally do, and what was the outcome? (${description})`,
+      };
+    }),
+    {
+      stageId: 'communication_defense',
+      competencyId: 'communication',
+      questionId: 'q_communication_defense',
+      questionText: `Give me a concise 60-second professional summary for a ${input.roleTitle} interview: who you are, what you have built or practiced, and why you are ready for this track.`,
+    },
+    {
+      stageId: 'execution_commitment',
+      competencyId: 'execution',
+      questionId: 'q_execution_commitment',
+      questionText: 'How many hours per week can you realistically dedicate to your roadmap, and what usually gets in the way of staying consistent?',
+    },
+  ];
+
+  const seen = new Set<string>();
+  return stages.filter((stage) => {
+    if (seen.has(stage.stageId)) return false;
+    seen.add(stage.stageId);
+    return true;
+  });
+}
+
+function auditStateFromContext(context: Record<string, unknown>, stages: AuditStageDefinition[]) {
+  const state = isRecord(context.auditState) ? context.auditState : {};
+  const requestedStage = typeof state.currentStage === 'string' ? state.currentStage : undefined;
+  const stage = stages.find((item) => item.stageId === requestedStage) || stages[0];
+  return {
+    stage,
+    followUpCount: typeof state.followUpCount === 'number' ? state.followUpCount : 0,
+    stateVersion: typeof state.stateVersion === 'number' ? state.stateVersion : 0,
   };
 }
 
@@ -907,10 +977,20 @@ For Live sessions, never call show_competency_benchmark unless a verified benchm
   });
 }
 
+app.get('/health/live', (_req, res) => {
+  res.json({ status: 'alive' });
+});
+
+app.get('/health/ready', (_req, res) => {
+  const readiness = buildReadinessHealth(serverConfig);
+  res.status(readiness.status === 'ready' ? 200 : 503).json(readiness);
+});
+
 app.get('/api/health', async (_req, res) => {
   const modelHealth = getGeminiModelHealth();
   res.json({
     ...serverConfig.publicHealth,
+    readiness: buildReadinessHealth(serverConfig),
     modelValidation: modelHealth,
   });
 });
@@ -1779,6 +1859,7 @@ app.get('/api/audit/:auditId/session', async (req, res) => {
       targetRoleId: session.target_role_id,
       status: session.status,
       targetRole,
+      auditState: isRecord(session.context?.auditState) ? session.context.auditState : null,
       messages: messages.map((m) => ({
         id: m.id,
         sender: m.actor,
@@ -1854,8 +1935,9 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
     const clientMessageId = requiredString(req.body?.clientMessageId, 'clientMessageId');
     const targetRole = requiredString(req.body?.targetRole, 'targetRole');
     const targetRoleId = requiredString(req.body?.targetRoleId, 'targetRoleId');
-    const currentStage = requiredString(req.body?.currentStage, 'currentStage');
-    const nextQuestion = optionalString(req.body?.nextQuestion) || '';
+    const expectedStateVersion = typeof req.body?.stateVersion === 'number' ? Number(req.body.stateVersion) : undefined;
+    const explicitSkip = req.body?.action === 'SKIP' || req.body?.explicitSkip === true || inputMethod === 'tap';
+    const legacyNextQuestion = optionalString(req.body?.nextQuestion) || '';
 
     const devSession = devAuditSessions.get(auditId);
     if (devSession) {
@@ -1868,7 +1950,7 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
         occurred_at: new Date().toISOString(),
         input_mode: inputMethod,
       });
-      const qalamText = nextQuestion || `Good. I captured that evidence for ${targetRole}. Tell me one more concrete example.`;
+      const qalamText = legacyNextQuestion || `Good. I captured that evidence for ${targetRole}. Tell me one more concrete example.`;
       devSession.messages.push({
         id: qalamMessageId,
         actor: 'assistant',
@@ -1902,6 +1984,21 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
     const supabase = await requireDatabase(res);
     if (!supabase) return;
     const session = await getAuditSession(supabase, auditId);
+    if (targetRoleId !== session.target_role_id) {
+      return apiError(res, 409, 'AUDIT_ROLE_MISMATCH', 'Submitted role does not match the active audit session.');
+    }
+    if (session.status === 'completed') {
+      return apiError(res, 409, 'AUDIT_ALREADY_COMPLETED', 'This audit attempt is already completed.');
+    }
+    const role = session.target_role_id ? await loadRole(supabase, session.target_role_id) : null;
+    const roleSkills = session.target_role_id ? await loadRoleSkills(supabase, [session.target_role_id]).catch(() => []) : [];
+    const competencyModel = session.target_role_id ? await loadCompetencyModel(supabase, session.target_role_id).catch(() => null) : null;
+    const stages = buildRoleAuditStages({
+      roleTitle: String(role?.title || targetRole),
+      roleSkills: roleSkills.map((skill) => String((skill as Record<string, unknown>).skill_name || '')).filter(Boolean),
+      competencyModel: competencyModel as Record<string, unknown> | null,
+    });
+    const currentState = auditStateFromContext(session.context || {}, stages);
     const userMessage = await persistAuditMessage(supabase, {
       auditId,
       studentId: session.user_id,
@@ -1909,51 +2006,111 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
       content: userText,
       inputMode: inputMethod as 'voice' | 'text' | 'tap' | 'system',
       clientMessageId,
-      metadata: { stage: currentStage, targetRole },
+      metadata: {
+        stage: currentState.stage.stageId,
+        competencyId: currentState.stage.competencyId,
+        questionId: currentState.stage.questionId,
+        targetRole,
+        expectedStateVersion,
+      },
     });
 
-    const aiPrompt = `Target Career Role: "${targetRole}".
-Current Audit Stage: "${currentStage}".
-Recommended Next Stage Question: "${nextQuestion}".
+    const noExperience = explicitSkip || isNoExperienceAnswer(userText);
+    const deterministicEvidenceStrength: EvidenceStrength = noExperience ? 'None' : 'Weak';
+
+    let aiResponse: {
+      qalamText: string;
+      qalamState: string;
+      evidenceStrength: EvidenceStrength;
+      needsFollowUp: boolean;
+      followUpQuestion: string;
+      nextAction: string;
+      extractedSkills: Array<{
+        skillName: string;
+        extractedLevel: string;
+        confidenceScore: number;
+        evidenceStrength: EvidenceStrength;
+      }>;
+    } | null = null;
+
+    if (!noExperience) {
+      const aiPrompt = `Target Career Role: "${targetRole}".
+Current Audit Stage: "${currentState.stage.stageId}".
+Current Competency: "${currentState.stage.competencyId}".
+Current Question: "${currentState.stage.questionText}".
 Student Answer: "${userText}".
 
 Evaluate this answer. Return JSON strictly complying with the schema.`;
 
-    const aiResponse = await generateStructuredJson({
-      model: serverConfig.geminiChatModel,
-      prompt: aiPrompt,
-      systemInstruction: `You are Qalam, Pathwisse CareerVoice.
-Conduct a strict, professional career readiness audit.
-Evaluate if the candidate provided concrete evidence of applied software, tools, libraries, or architecture.
-If the answer is vague or lacks concrete evidence, set evidenceStrength to Weak or None, and needsFollowUp to true.
+      aiResponse = await generateStructuredJson({
+        model: serverConfig.geminiChatModel,
+        prompt: aiPrompt,
+        systemInstruction: `You are Qalam, Pathwisse CareerVoice.
+Conduct a strict, professional career readiness audit for the selected role and current competency only.
+Evaluate concrete role-relevant evidence: projects, tools, calculations, designs, experiments, debugging, deployment, documentation, or domain practice.
+Do not decide whether the audit advances; the server state machine owns progression.
+If the answer is vague or lacks concrete evidence, set evidenceStrength to Weak or None and provide at most one useful follow-up question.
 Speak in 1-2 conversational sentences.`,
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          qalamText: { type: Type.STRING },
-          qalamState: { type: Type.STRING },
-          evidenceStrength: { type: Type.STRING },
-          needsFollowUp: { type: Type.BOOLEAN },
-          followUpQuestion: { type: Type.STRING },
-          nextAction: { type: Type.STRING },
-          extractedSkills: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                skillName: { type: Type.STRING },
-                extractedLevel: { type: Type.STRING },
-                confidenceScore: { type: Type.NUMBER },
-                evidenceStrength: { type: Type.STRING },
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            qalamText: { type: Type.STRING },
+            qalamState: { type: Type.STRING },
+            evidenceStrength: { type: Type.STRING },
+            needsFollowUp: { type: Type.BOOLEAN },
+            followUpQuestion: { type: Type.STRING },
+            nextAction: { type: Type.STRING },
+            extractedSkills: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  skillName: { type: Type.STRING },
+                  extractedLevel: { type: Type.STRING },
+                  confidenceScore: { type: Type.NUMBER },
+                  evidenceStrength: { type: Type.STRING },
+                },
+                required: ['skillName', 'extractedLevel', 'confidenceScore', 'evidenceStrength'],
               },
-              required: ['skillName', 'extractedLevel', 'confidenceScore', 'evidenceStrength'],
             },
           },
+          required: ['qalamText', 'qalamState', 'evidenceStrength', 'needsFollowUp', 'followUpQuestion', 'nextAction', 'extractedSkills'],
         },
-        required: ['qalamText', 'qalamState', 'evidenceStrength', 'needsFollowUp', 'followUpQuestion', 'nextAction', 'extractedSkills'],
-      },
-      validate: (value: any) => value,
+        validate: (value: any) => value,
+      });
+    }
+
+    const evidenceStrength = (aiResponse?.evidenceStrength || deterministicEvidenceStrength) as EvidenceStrength;
+    const transition = decideAuditTransition({
+      stages,
+      currentStageId: currentState.stage.stageId,
+      currentCompetencyId: currentState.stage.competencyId,
+      currentQuestionId: currentState.stage.questionId,
+      stateVersion: currentState.stateVersion,
+      expectedStateVersion,
+      evidenceStrength,
+      studentAnswer: userText,
+      followUpCount: currentState.followUpCount,
+      followUpQuestion: aiResponse?.followUpQuestion || aiResponse?.qalamText || '',
+      explicitSkip,
     });
+
+    const nextContext = {
+      ...(session.context || {}),
+      auditState: {
+        currentStage: transition.nextStage,
+        currentCompetencyId: transition.nextCompetencyId,
+        currentQuestionId: transition.nextQuestionId,
+        followUpCount: transition.followUpCount,
+        stateVersion: transition.stateVersion,
+        progress: transition.progress,
+        lastAction: transition.action,
+        lastEvaluatedStage: transition.evaluatedStage,
+        lastEvidenceStrength: transition.evidenceStrength,
+      },
+    };
+    const qalamText = transition.questionText;
+    const qalamState = transition.action === 'COMPLETE' ? 'CELEBRATING' : transition.action === 'FOLLOW_UP' ? 'CURIOUS' : 'ENCOURAGING';
 
     const evidenceUpdate = await supabase
       .from('audit_evidence')
@@ -1966,15 +2123,56 @@ Speak in 1-2 conversational sentences.`,
       auditId,
       studentId: session.user_id,
       actor: 'assistant',
-      content: aiResponse.qalamText,
+      content: qalamText,
       inputMode: 'system',
       clientMessageId: `${clientMessageId}:qalam`,
-      metadata: { stage: currentStage, needsFollowUp: aiResponse.needsFollowUp },
+      metadata: {
+        stage: transition.nextStage,
+        evaluatedStage: transition.evaluatedStage,
+        needsFollowUp: transition.action === 'FOLLOW_UP',
+        action: transition.action,
+        stateVersion: transition.stateVersion,
+      },
     });
-    await updateAuditSession(supabase, auditId, { status: 'in_progress', current_question_key: currentStage });
+    await updateAuditSession(supabase, auditId, {
+      status: transition.action === 'COMPLETE' ? 'ready_for_report' : 'in_progress',
+      current_question_key: transition.nextStage,
+      current_stage: transition.nextStage,
+      current_competency_id: transition.nextCompetencyId,
+      current_question_id: transition.nextQuestionId,
+      follow_up_count: transition.followUpCount,
+      progress: transition.progress,
+      state_version: transition.stateVersion,
+      context: nextContext,
+    });
 
-    return res.json({ success: true, sourceMessageId: userMessage.id, qalamMessageId: qalamMessage.id, ...aiResponse });
+    return res.json({
+      success: true,
+      sourceMessageId: userMessage.id,
+      qalamMessageId: qalamMessage.id,
+      qalamText,
+      qalamState,
+      evidenceStrength: transition.evidenceStrength,
+      needsFollowUp: transition.action === 'FOLLOW_UP',
+      followUpQuestion: transition.action === 'FOLLOW_UP' ? qalamText : '',
+      nextAction: transition.action === 'COMPLETE' ? 'complete' : transition.action === 'FOLLOW_UP' ? 'probe' : 'switch_skill',
+      extractedSkills: noExperience ? [] : aiResponse?.extractedSkills || [],
+      evaluatedStage: transition.evaluatedStage,
+      evaluatedCompetencyId: transition.evaluatedCompetencyId,
+      evaluatedQuestionId: transition.evaluatedQuestionId,
+      action: transition.action,
+      followUpCount: transition.followUpCount,
+      nextStage: transition.nextStage,
+      nextCompetencyId: transition.nextCompetencyId,
+      nextQuestionId: transition.nextQuestionId,
+      questionText: transition.questionText,
+      progress: transition.progress,
+      stateVersion: transition.stateVersion,
+    });
   } catch (error) {
+    if (error instanceof Error && error.message === 'STALE_AUDIT_STATE') {
+      return apiError(res, 409, 'STALE_AUDIT_STATE', 'This answer was submitted against an older audit state. Refresh the audit session and retry.');
+    }
     return handleRouteError(res, error, 'qalam_chat');
   }
 });

@@ -77,6 +77,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   const [turnError, setTurnError] = useState<string | null>(null);
   const [retryTurn, setRetryTurn] = useState<RetryTurn | null>(null);
   const [showCoverageMap, setShowCoverageMap] = useState(false);
+  const [serverStateVersion, setServerStateVersion] = useState<number | undefined>(undefined);
 
   const { data: competencyModel } = useRoleCompetencies(role.id);
 
@@ -138,6 +139,9 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   });
 
   const lastQalamMessage = [...messages].reverse().find((m) => m.sender === 'qalam')?.text;
+  const coveredEvidenceCount = evidenceCoverageItems.filter((i) =>
+    i.evidenceStrength === 'Strong' || i.evidenceStrength === 'Moderate'
+  ).length;
 
   const handleSpeechResult = (text: string) => {
     if (text.trim()) void submitAnswer(text.trim(), 'voice');
@@ -183,7 +187,8 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
   async function submitAnswer(
     answerText: string,
     inputMethod: InputMethod,
-    existingClientMessageId?: string
+    existingClientMessageId?: string,
+    options: { explicitSkip?: boolean } = {}
   ) {
     if (isAiLoading) return;
     stopListening();
@@ -230,7 +235,11 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
         targetRole: role.title,
         currentStage: PROBE_STAGES[currentTurn].id,
         nextQuestion,
+        stateVersion: serverStateVersion,
+        action: options.explicitSkip ? 'SKIP' : 'ANSWER',
+        explicitSkip: options.explicitSkip,
       });
+      setServerStateVersion(data.stateVersion);
 
       if (Array.isArray((data as any).toolCalls) && (data as any).toolCalls.length > 0) {
         onToolCalls?.((data as any).toolCalls as QalamToolCall[]);
@@ -284,7 +293,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       setMessages(nextMessages);
       setRetryTurn(null);
 
-      if (data.needsFollowUp) {
+      if (data.needsFollowUp || data.action === 'FOLLOW_UP') {
         setIsFollowUpActive(true);
         setQalamState('SPEAKING');
         speakText(data.qalamText, () => setQalamState('LISTENING'));
@@ -292,7 +301,17 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
       }
 
       setIsFollowUpActive(false);
-      if (currentTurn < PROBE_STAGES.length - 1) {
+      if (data.action === 'COMPLETE' || data.nextAction === 'complete') {
+        setQalamState('CELEBRATING');
+        const finishInterview = () => {
+          onInterviewFinished({
+            messages: nextMessages,
+            skillsExtracted: nextSkills,
+            communicationSample: communicationSample || answerText,
+          });
+        };
+        speakText(data.qalamText, finishInterview);
+      } else if (currentTurn < PROBE_STAGES.length - 1) {
         const nextIndex = currentTurn + 1;
         setCurrentTurn(nextIndex);
         setQalamState('SPEAKING');
@@ -327,7 +346,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
 
   const handleSkip = () => {
     trackEvent('voice_question_skipped', { auditId, turn: currentTurn });
-    void submitAnswer('I have not built this yet.', 'tap');
+    void submitAnswer('skip', 'tap', undefined, { explicitSkip: true });
   };
 
   return (
@@ -347,8 +366,7 @@ export const AdaptiveInterviewStep: React.FC<AdaptiveInterviewStepProps> = ({
         >
           <Shield className="w-3 h-3" />
           <span>
-            {evidenceCoverageItems.filter((i) => i.evidenceStrength !== 'None').length} /{' '}
-            {evidenceCoverageItems.length} Covered
+            {coveredEvidenceCount} / {evidenceCoverageItems.length} Covered
           </span>
           {showCoverageMap ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>

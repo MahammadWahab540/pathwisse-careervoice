@@ -321,7 +321,6 @@ function MainApp() {
       const session = await createAuditSession({
         studentId: identity.studentId,
         targetRoleId: confirmedRole.id,
-        idempotencyKey: `audit_${identity.studentId}_${confirmedRole.id}`,
         context: {
           firstName,
           collegeName,
