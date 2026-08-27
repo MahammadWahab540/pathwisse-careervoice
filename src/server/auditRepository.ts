@@ -221,6 +221,14 @@ function toSkillSlug(value: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+function normalizeSkillLevel(level: string): 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert' {
+  const norm = (level || '').trim().toLowerCase();
+  if (norm === 'expert') return 'Expert';
+  if (norm === 'advanced') return 'Advanced';
+  if (norm === 'intermediate') return 'Intermediate';
+  return 'Beginner';
+}
+
 export async function persistSkillSignal(
   supabase: SupabaseClient,
   input: SkillSignalInput
@@ -292,7 +300,7 @@ export async function persistSkillSignal(
       role_id: session.target_role_id,
       skill_slug: toSkillSlug(input.skillName),
       skill_name: input.skillName,
-      level: input.extractedLevel,
+      level: normalizeSkillLevel(input.extractedLevel),
       score: null,
       confidence: input.confidenceScore / 100,
       source_message_id: input.sourceMessageId || null,

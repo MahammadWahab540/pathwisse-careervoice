@@ -35,17 +35,31 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
       <QalamCharacter
         state={mappedCount > 0 ? 'CELEBRATING' : 'CURIOUS'}
         subtitles={mappedCount > 0
-          ? 'Your highest-priority gaps are linked to Pathwisse learning steps.'
+          ? 'Your highest-priority gaps are linked to initial Pathwisse learning steps.'
           : 'Your audit is complete. Some gaps need a custom action before a guided lesson is available.'}
       />
 
       <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">Your next actions</span>
-            <h2 className="text-base font-bold text-[#0b111e] mt-0.5">Pathwisse improvement plan</h2>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">Diagnostic Next Actions</span>
+            <h2 className="text-base font-bold text-[#0b111e] mt-0.5">Pathwisse Action Plan</h2>
           </div>
           <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1f3861] flex items-center justify-center"><Map className="w-4 h-4" /></div>
+        </div>
+
+        {/* Custom 6-Week Roadmap in Progress Notice */}
+        <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/70 to-slate-50 p-3.5 space-y-1 shadow-xs">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
+            </span>
+            <span>Personalized 6-Week Roadmap in Progress</span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-slate-700 font-medium">
+            Our team is building your full customized 6-week roadmap. In the meantime, start with the verified priority actions below.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2">

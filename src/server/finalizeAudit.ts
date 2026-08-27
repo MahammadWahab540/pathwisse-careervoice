@@ -358,6 +358,7 @@ async function persistFinalClassification(
     .maybeSingle();
   if (existing.error) throw new PersistenceError('final_signal_lookup', existing.error.message);
   if (existing.data?.id) return existing.data.id as string;
+  const isDemonstrated = input.classification.evidenceStrength === 'Strong' || input.classification.evidenceStrength === 'Moderate';
 
   const inserted = await supabase
     .from('audit_skill_signals')
@@ -380,10 +381,10 @@ async function persistFinalClassification(
       evidence_strength: input.classification.evidenceStrength,
       raw_answer_snippet: input.evidence.raw_text || '',
       source: input.evidence.source || 'document',
-      contract_version: 'career-audit:v1',
+      contract_version: isDemonstrated ? 'career-audit:v1' : 'legacy',
       metadata: {
-        classifier: 'gemini-http',
-        classifierModel: serverConfig.geminiEvaluationModel,
+        classifier: serverConfig.openrouterConfigured ? 'openrouter-http' : 'gemini-http',
+        classifierModel: serverConfig.openrouterConfigured ? serverConfig.openrouterLlmModel : serverConfig.geminiEvaluationModel,
         competencySkillId: input.competency.skillId,
         contradictory: input.classification.contradictory,
       },

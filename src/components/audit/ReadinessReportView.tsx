@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { CareerAuditResult, CareerRoleTarget } from '../../types';
 import { QalamCharacter } from '../qalam/QalamCharacter';
 import { DiagnosticChainCard } from './DiagnosticChainCard';
@@ -58,7 +58,7 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
     <div className="flex flex-col items-center min-h-[calc(100vh-80px)] px-4 py-5 max-w-md mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
       <QalamCharacter
         state={result.readinessStatus === 'Ready' ? 'CELEBRATING' : 'CURIOUS'}
-        subtitles={`Here is your ${role.title} readiness report, based on the evidence you shared against the ${result.hiringBenchmark}/100 benchmark.`}
+        subtitles={`Here is your ${role.title} diagnostic readiness report, based on the evidence you shared against the ${result.hiringBenchmark}/100 benchmark.`}
       />
 
       <div className="w-full rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-5">
@@ -76,6 +76,22 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
             <div className="text-3xl font-mono font-extrabold text-[#1f3861]">{result.overallScore}</div>
             <div className="text-[10px] font-bold text-slate-500">Readiness Score</div>
           </div>
+        </div>
+
+        {/* Custom 6-Week Roadmap & Comprehensive Report In Progress Banner */}
+        <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/70 to-slate-50 p-4 space-y-1.5 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
+            </span>
+            <span className="text-[10.5px] font-bold text-[#1f3861] uppercase tracking-wider">
+              Custom Report & 6-Week Roadmap in Progress
+            </span>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-700 font-medium">
+            Our team is curating your customized in-depth career report and personalized 6-week milestone roadmap based on your demonstrated audit evidence.
+          </p>
         </div>
 
         {/* 2. Why This Role Fits */}

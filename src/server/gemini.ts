@@ -74,6 +74,10 @@ async function generateOpenRouterStructuredJson<T>(options: {
   let lastError: unknown;
   for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
     try {
+      const models = options.model.includes(',')
+        ? options.model.split(',').map((m) => m.trim()).filter(Boolean)
+        : [options.model];
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -83,7 +87,7 @@ async function generateOpenRouterStructuredJson<T>(options: {
           'X-Title': 'Pathwisse CareerVoice',
         },
         body: JSON.stringify({
-          model: options.model,
+          ...(models.length > 1 ? { models } : { model: models[0] }),
           messages: [
             {
               role: 'system',

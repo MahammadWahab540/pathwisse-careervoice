@@ -17,7 +17,7 @@ const STEPS = [
   'Reviewing project evidence & links',
   'Mapping critical skill gaps',
   'Comparing against benchmark role requirements',
-  'Building your personalised 6-week Pathwisse path',
+  'Packaging verified signals & diagnostic assessment',
 ];
 
 export const ProcessingSequenceStep: React.FC<ProcessingSequenceStepProps> = ({
