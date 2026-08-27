@@ -34,6 +34,63 @@ export interface AuditSessionRow {
   state_version?: number | null;
 }
 
+export async function persistTranscriptLog(
+  supabase: SupabaseClient,
+  input: {
+    flow: 'discovery' | 'audit';
+    eventType: string;
+    studentId?: string | null;
+    phone?: string | null;
+    auditId?: string | null;
+    discoverySessionId?: string | null;
+    targetRoleId?: string | null;
+    questionKey?: string | null;
+    actor: 'user' | 'assistant' | 'system';
+    content: string;
+    inputMode?: string | null;
+    sequenceNo?: number | null;
+    clientMessageId?: string | null;
+    metadata?: Record<string, unknown>;
+    occurredAt?: string;
+  }
+): Promise<string | null> {
+  const studentId = input.studentId || null;
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const userId = studentId && uuidRe.test(studentId) ? studentId : null;
+  const externalUserId = studentId && !uuidRe.test(studentId) ? studentId : null;
+  const auditSessionId = input.auditId && uuidRe.test(input.auditId) ? input.auditId : null;
+  const discoverySessionId = input.discoverySessionId && uuidRe.test(input.discoverySessionId) ? input.discoverySessionId : null;
+  const targetRoleId = input.targetRoleId && uuidRe.test(input.targetRoleId) ? input.targetRoleId : null;
+  if (!userId && !externalUserId && !input.phone) return null;
+
+  const inserted = await supabase
+    .from('career_voice_transcript_logs')
+    .insert({
+      flow: input.flow,
+      event_type: input.eventType,
+      user_id: userId,
+      external_user_id: externalUserId,
+      phone: input.phone || null,
+      audit_session_id: auditSessionId,
+      audit_session_ref: input.auditId || null,
+      discovery_session_id: discoverySessionId,
+      discovery_session_ref: input.discoverySessionId || null,
+      target_role_id: targetRoleId,
+      question_key: input.questionKey || null,
+      actor: input.actor,
+      content: input.content,
+      input_mode: input.inputMode || null,
+      sequence_no: input.sequenceNo ?? null,
+      client_message_id: input.clientMessageId || null,
+      metadata: input.metadata || {},
+      occurred_at: input.occurredAt || new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+  if (inserted.error || !inserted.data) fail('career_voice_transcript_log_insert', inserted.error);
+  return inserted.data.id as string;
+}
+
 export async function createOrResumeAuditSession(
   supabase: SupabaseClient,
   input: {

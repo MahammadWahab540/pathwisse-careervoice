@@ -328,6 +328,7 @@ function MainApp() {
           branch: departmentName,
           academicYear,
           careerIntent: userRawIntent,
+          phone: identity.phone,
         },
       });
 
@@ -549,6 +550,7 @@ function MainApp() {
           {currentStep === 'CAREER_DISCOVERY' && (
             <CareerDiscoveryStep
               studentId={identity?.studentId}
+              phone={identity?.phone}
               firstName={firstName}
               departmentName={departmentName}
               careerStreamId={careerStreamId}
