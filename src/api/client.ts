@@ -17,6 +17,10 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   if (!headers.has('Content-Type') && options.body && typeof options.body === 'string') {
     headers.set('Content-Type', 'application/json');
   }
+  if (!headers.has('Authorization') && typeof localStorage !== 'undefined') {
+    const token = localStorage.getItem('careervoice_supabase_access_token');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
 
   const response = await fetch(url, {
     ...options,

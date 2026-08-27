@@ -18,6 +18,7 @@ export interface UserIdentity {
   countryCode: string;
   isOtpVerified: boolean;
   studentId: string;
+  accessToken?: string;
   anonymousId: string;
   sessionId: string;
   referralCode?: string;

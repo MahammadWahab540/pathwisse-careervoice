@@ -19,8 +19,13 @@ export interface CareerDiscoveryProfileDto {
 
 export interface CareerDiscoveryStateDto {
   success: true;
+  sessionId: string;
+  status: 'in_progress' | 'completed';
   profile: CareerDiscoveryProfileDto;
+  currentQuestion: DiscoveryQuestionDto | null;
   nextQuestion: DiscoveryQuestionDto | null;
+  completedQuestionKeys: string[];
+  stateVersion: number;
   completed: boolean;
 }
 
@@ -34,17 +39,18 @@ export interface CareerDiscoveryInput {
 }
 
 export async function getCareerDiscoveryState(input: CareerDiscoveryInput): Promise<CareerDiscoveryStateDto> {
-  const params = new URLSearchParams();
-  if (input.studentId) params.set('studentId', input.studentId);
-  if (input.phone) params.set('phone', input.phone);
-  if (input.branch) params.set('branch', input.branch);
-  if (input.academicYear !== undefined) params.set('academicYear', String(input.academicYear));
-  if (input.careerIntent) params.set('careerIntent', input.careerIntent);
-  return api.get<CareerDiscoveryStateDto>(`/api/career-discovery?${params.toString()}`);
+  return api.post<CareerDiscoveryStateDto>('/api/career-discovery/session', input);
 }
 
 export async function submitCareerDiscoveryAnswer(
-  input: CareerDiscoveryInput & { questionKey: string; answer: string },
+  input: CareerDiscoveryInput & {
+    discoverySessionId: string;
+    questionKey: string;
+    answer: string;
+    clientMessageId: string;
+    stateVersion: number;
+    inputMode?: string;
+  },
 ): Promise<CareerDiscoveryStateDto> {
   return api.post<CareerDiscoveryStateDto>('/api/career-discovery/answer', input);
 }
