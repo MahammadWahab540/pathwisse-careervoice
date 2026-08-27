@@ -44,6 +44,7 @@ import { getRoadmapHandoff } from './api/roadmap';
 import { trackAnalyticsEvent } from './api/analytics';
 import {
   ACTIVE_AUDIT_ID_KEY,
+  AUTH_ACCESS_TOKEN_KEY,
   FLOW_CHECKPOINT_KEY,
   PHONE_KEY,
   STUDENT_ID_KEY,
@@ -571,6 +572,7 @@ function MainApp() {
                 setIdentity(ident);
                 localStorage.setItem(STUDENT_ID_KEY, ident.studentId);
                 localStorage.setItem(PHONE_KEY, ident.phone);
+                if (ident.accessToken) localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, ident.accessToken);
                 logCareerVoiceEvent('otp_identity_persisted', { studentId: ident.studentId, phone: ident.phone });
                 transitionToStep('ASK_NAME', 'otp_next_step_committed', { nextIdentity: ident, nextAuditId: auditId });
               }}

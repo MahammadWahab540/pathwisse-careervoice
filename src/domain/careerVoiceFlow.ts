@@ -31,6 +31,7 @@ export interface CareerVoiceCheckpoint {
 export const FLOW_CHECKPOINT_KEY = 'careervoice_flow_checkpoint_v1';
 export const STUDENT_ID_KEY = 'careervoice_student_id';
 export const PHONE_KEY = 'careervoice_phone';
+export const AUTH_ACCESS_TOKEN_KEY = 'careervoice_supabase_access_token';
 export const ACTIVE_AUDIT_ID_KEY = 'careervoice_active_audit_id';
 
 const VALID_STEPS = new Set<CareerVoiceStep>([
@@ -73,6 +74,7 @@ export function buildVerifiedIdentity(
     countryCode: existing?.countryCode || '+91',
     isOtpVerified: true,
     studentId,
+    accessToken: existing?.accessToken,
     anonymousId: existing?.anonymousId || crypto.randomUUID(),
     sessionId: existing?.sessionId || crypto.randomUUID(),
     referralCode: existing?.referralCode,
@@ -107,6 +109,7 @@ export function writeCareerVoiceCheckpoint(
   storage.setItem(FLOW_CHECKPOINT_KEY, JSON.stringify(checkpoint));
   if (checkpoint.identity?.studentId) storage.setItem(STUDENT_ID_KEY, checkpoint.identity.studentId);
   if (checkpoint.identity?.phone) storage.setItem(PHONE_KEY, checkpoint.identity.phone);
+  if (checkpoint.identity?.accessToken) storage.setItem(AUTH_ACCESS_TOKEN_KEY, checkpoint.identity.accessToken);
   if (checkpoint.activeAuditId) storage.setItem(ACTIVE_AUDIT_ID_KEY, checkpoint.activeAuditId);
 }
 

@@ -23,6 +23,12 @@ import {
   type DiscoveryQuestionKey,
   type DiscoveryRole,
 } from './src/domain/careerDiscovery';
+import {
+  CareerDiscoveryStateError,
+  createSupabaseDiscoveryStore,
+  startOrResumeDiscoverySession,
+  submitDiscoveryAnswer,
+} from './src/server/careerDiscoveryState';
 import { extractCareerSignals } from './src/ai/careerSignalExtractor';
 import { retrieveCareerCandidates } from './src/domain/careerCandidateRetriever';
 import { buildCareerRecommendationsV2, calculateCareerFitV2, type CareerRecommendationV2 } from './src/domain/careerFitV2';
@@ -43,6 +49,7 @@ import {
   createOrResumeAuditSession,
   getAuditSession,
   loadAuditMessages,
+  loadAuditEvidence,
   loadCompetencyModel,
   loadRole,
   loadRoleSkills,
@@ -178,6 +185,46 @@ function devStudentIdForPhone(phone: string): string {
   return 'dev_user_' + normalizePhoneForOtp(phone).replace(/\D/g, '');
 }
 
+async function sendSupabaseWhatsappOtp(phone: string): Promise<{ success: boolean; message?: string }> {
+  if (!serverConfig.supabaseUrl) throw new Error('SUPABASE_NOT_CONFIGURED');
+  const apiKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || serverConfig.supabaseServiceRoleKey || '';
+  const url = `${serverConfig.supabaseUrl}/functions/v1/send-whatsapp-otp`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+    },
+    body: JSON.stringify({ phone }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message || 'Failed to send WhatsApp OTP');
+  }
+  return { success: true, message: data?.message };
+}
+
+async function verifySupabaseWhatsappOtp(phone: string, token: string): Promise<{ success: boolean; error?: string }> {
+  if (!serverConfig.supabaseUrl) throw new Error('SUPABASE_NOT_CONFIGURED');
+  const apiKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || serverConfig.supabaseServiceRoleKey || '';
+  const url = `${serverConfig.supabaseUrl}/functions/v1/verify-whatsapp-otp`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+    },
+    body: JSON.stringify({ phone, otp: token }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.error) {
+    return { success: false, error: typeof data?.error === 'string' ? data.error : data?.error?.message || 'OTP verification failed' };
+  }
+  return { success: true };
+}
+
 async function sendMetaWhatsappOtp(phone: string, token: string): Promise<string | null> {
   if (!serverConfig.metaWhatsappAccessToken || !serverConfig.metaWhatsappPhoneNumberId || !serverConfig.metaWhatsappTemplateName) {
     throw new Error('META_WHATSAPP_NOT_CONFIGURED');
@@ -244,41 +291,62 @@ async function findAuthUserIdByPhone(phone: string): Promise<string | null> {
   return null;
 }
 
-async function ensureVerifiedPhoneProfile(phone: string): Promise<string> {
+async function ensureVerifiedUser(studentId?: string | null, phone?: string | null): Promise<string> {
   const supabase = requireSupabase();
-  const normalized = normalizePhoneForOtp(phone);
-  let userId = await findAuthUserIdByPhone(normalized);
+  const normalizedPhone = phone ? normalizePhoneForOtp(phone) : null;
 
-  if (!userId) {
-    const created = await supabase.auth.admin.createUser({
-      phone: normalized,
-      phone_confirm: true,
-      user_metadata: { phone_verified: true, whatsapp_opt_in: true },
-    } as any);
-    if (created.error || !created.data.user) {
-      throw new PersistenceError('auth_phone_user_create', created.error?.message || 'Could not create verified phone user.');
+  if (normalizedPhone) {
+    const existingId = await findAuthUserIdByPhone(normalizedPhone);
+    if (existingId) return existingId;
+  }
+
+  const targetId = (studentId && UUID_RE.test(studentId)) ? studentId : randomUUID();
+
+  // Check if targetId already exists in auth.users
+  const userCheck = await supabase.auth.admin.getUserById(targetId);
+  if (userCheck.data?.user) {
+    return userCheck.data.user.id;
+  }
+
+  // Create auth user with targetId
+  const payload: Record<string, unknown> = {
+    id: targetId,
+    email: `${targetId}@careervoice.internal`,
+    email_confirm: true,
+    user_metadata: {
+      phone_verified: Boolean(normalizedPhone),
+      phone: normalizedPhone || undefined,
+    },
+  };
+  if (normalizedPhone) {
+    payload.phone = normalizedPhone;
+    payload.phone_confirm = true;
+  }
+
+  const created = await supabase.auth.admin.createUser(payload as any);
+  if (created.error || !created.data?.user) {
+    if (normalizedPhone) {
+      const fallbackId = await findAuthUserIdByPhone(normalizedPhone);
+      if (fallbackId) return fallbackId;
     }
-    userId = created.data.user.id;
   }
 
-  const profile = await supabase
-    .from('profiles')
-    .upsert(
-      {
-        user_id: userId,
-        phone: normalized,
-        phone_verified: true,
-        whatsapp_opt_in: true,
-        updated_at: new Date().toISOString(),
-      },
+  const finalId = created.data?.user?.id || targetId;
+
+  if (normalizedPhone) {
+    const profileSync = await supabase.from('profiles').upsert(
+      { user_id: finalId, phone: normalizedPhone, phone_verified: true, whatsapp_opt_in: true, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
-    )
-    .select('user_id')
-    .single();
-  if (profile.error || !profile.data) {
-    throw new PersistenceError('verified_phone_profile_upsert', profile.error?.message || 'Profile could not be updated.');
+    ).select('user_id').maybeSingle();
+    if (profileSync.error) console.warn('verified_profile_upsert_notice', profileSync.error.message);
+
   }
-  return String(profile.data.user_id);
+
+  return finalId;
+}
+
+async function ensureVerifiedPhoneProfile(phone: string): Promise<string> {
+  return ensureVerifiedUser(null, phone);
 }
 
 function apiError(
@@ -291,7 +359,87 @@ function apiError(
   return res.status(status).json({ success: false, code, message, ...(details === undefined ? {} : { details }) });
 }
 
+class AuthSessionError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) {
+    super(message);
+    this.name = 'AuthSessionError';
+  }
+}
+
+function accessTokenFromRequest(req: express.Request): string {
+  const authorization = req.header('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) throw new AuthSessionError(401, 'AUTH_REQUIRED', 'Supabase session is required.');
+  return match[1].trim();
+}
+
+async function requireAuthenticatedUser(req: express.Request) {
+  const supabase = requireSupabase();
+  const accessToken = accessTokenFromRequest(req);
+  const result = await supabase.auth.getUser(accessToken);
+  if (result.error) {
+    console.warn('auth_invalid', { message: result.error.message });
+    throw new AuthSessionError(401, 'INVALID_SESSION', 'Supabase session is invalid or expired.');
+  }
+  if (!result.data.user) throw new AuthSessionError(401, 'INVALID_SESSION', 'Supabase session is invalid or expired.');
+  return { supabase, user: result.data.user };
+}
+
+async function ensureCanonicalProfile(input: {
+  userId: string;
+  phone?: string | null;
+  name?: string | null;
+  department?: string | null;
+  academicYear?: number | null;
+  careerIntent?: string | null;
+}) {
+  const supabase = requireSupabase();
+  const existing = await supabase
+    .from('profiles')
+    .select('id,user_id,phone,full_name,department,academic_year,career_intent,career_discovery_profile')
+    .eq('user_id', input.userId)
+    .maybeSingle();
+  if (existing.error) throw new PersistenceError('profile_read', existing.error.message);
+
+  const row: Record<string, unknown> = {
+    user_id: input.userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (!existing.data?.phone && input.phone) row.phone = input.phone;
+  if (!existing.data?.full_name && input.name) row.full_name = input.name;
+  if (!existing.data?.department && input.department) row.department = input.department;
+  if (!existing.data?.academic_year && input.academicYear) row.academic_year = input.academicYear;
+  if (!existing.data?.career_intent && input.careerIntent) row.career_intent = input.careerIntent;
+
+  const result = await supabase
+    .from('profiles')
+    .upsert(row, { onConflict: 'user_id' })
+    .select('id,user_id,phone,full_name,department,academic_year,career_intent,career_discovery_profile')
+    .single();
+  if (result.error || !result.data) {
+    console.warn('profile_missing', { userId: input.userId, message: result.error?.message });
+    throw new PersistenceError('profile_provisioning', result.error?.message || 'Profile could not be provisioned.');
+  }
+  return result.data as Record<string, unknown>;
+}
+
+function logDiscoveryTransition(event: string, payload: Record<string, unknown>) {
+  console.log(event, {
+    event,
+    stateMachine: process.env.CAREER_DISCOVERY_STATE_MACHINE_VERSION || 'v2',
+    ...payload,
+  });
+}
+
 function handleRouteError(res: express.Response, error: unknown, operation: string) {
+  if (error instanceof AuthSessionError) {
+    return apiError(res, error.status, error.code, error.message);
+  }
+  if (error instanceof CareerDiscoveryStateError) {
+    if (error.code === 'STALE_DISCOVERY_STATE') console.warn('stale_state_rejected', { sessionId: error.session?.sessionId });
+    if (error.code === 'INVALID_DISCOVERY_QUESTION') console.warn('invalid_question_rejected', { sessionId: error.session?.sessionId });
+    return apiError(res, error.status, error.code, error.message, error.session ? { session: error.session } : undefined);
+  }
   if (error instanceof AiUnavailableError) {
     return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
   }
@@ -303,7 +451,8 @@ function handleRouteError(res: express.Response, error: unknown, operation: stri
   }
   if (error instanceof PersistenceError) {
     const notFound = /not found/i.test(error.message);
-    return apiError(res, notFound ? 404 : 500, error.code, notFound ? error.message : 'Career audit data could not be persisted.', {
+    const isProfileProvisioning = error.operation === 'profile_provisioning';
+    return apiError(res, isProfileProvisioning ? 503 : notFound ? 404 : 500, isProfileProvisioning ? 'PROFILE_PROVISIONING_FAILED' : error.code, notFound ? error.message : 'Career audit data could not be persisted.', {
       operation: error.operation,
     });
   }
@@ -1003,6 +1152,20 @@ app.get('/health/live', (_req, res) => {
   res.json({ status: 'alive' });
 });
 
+function deploymentCommit(): string {
+  return process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'unknown';
+}
+
+app.get('/health', async (_req, res) => {
+  res.json({
+    status: 'ok',
+    database: serverConfig.supabaseConfigured ? 'configured' : 'unconfigured',
+    authProvider: 'supabase',
+    discoveryStateMachine: process.env.CAREER_DISCOVERY_STATE_MACHINE_VERSION || 'v2',
+    commit: deploymentCommit(),
+  });
+});
+
 app.get('/health/ready', (_req, res) => {
   const readiness = buildReadinessHealth(serverConfig);
   res.status(readiness.status === 'ready' ? 200 : 503).json(readiness);
@@ -1012,6 +1175,9 @@ app.get('/api/health', async (_req, res) => {
   const modelHealth = getGeminiModelHealth();
   res.json({
     ...serverConfig.publicHealth,
+    authProvider: 'supabase',
+    discoveryStateMachine: process.env.CAREER_DISCOVERY_STATE_MACHINE_VERSION || 'v2',
+    commit: deploymentCommit(),
     readiness: buildReadinessHealth(serverConfig),
     modelValidation: modelHealth,
   });
@@ -1277,6 +1443,17 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return res.json({ success: true, phone, devMode: true });
     }
 
+    if (serverConfig.supabaseUrl) {
+      try {
+        const edgeRes = await sendSupabaseWhatsappOtp(phone);
+        if (edgeRes.success) {
+          return res.json({ success: true, phone, channel: 'whatsapp' });
+        }
+      } catch (edgeError) {
+        console.warn('supabase_edge_whatsapp_otp_attempt_failed', edgeError instanceof Error ? edgeError.message : String(edgeError));
+      }
+    }
+
     const supabase = getSupabase();
     if (!supabase) {
       console.log(`[DEV_AUTH] Dev OTP code for ${phone} is 123456 (Supabase offline)`);
@@ -1314,25 +1491,57 @@ app.post('/api/auth/otp/verify', async (req, res) => {
 
     const testCode = await getOtpTestCodeForPhone(phone);
     if (testCode && token === testCode) {
+      let studentId: string;
+      try {
+        studentId = await ensureVerifiedPhoneProfile(phone);
+      } catch (profileErr) {
+        console.warn('verified_phone_profile_sync_warning', profileErr);
+        studentId = randomUUID();
+      }
       return res.json({
         success: true,
-        studentId: devStudentIdForPhone(phone),
+        studentId,
         phone,
         devMode: true,
       });
     }
 
+    if (serverConfig.supabaseUrl) {
+      try {
+        const edgeRes = await verifySupabaseWhatsappOtp(phone, token);
+        if (edgeRes.success) {
+          let studentId: string;
+          try {
+            studentId = await ensureVerifiedPhoneProfile(phone);
+          } catch (profileErr) {
+            console.warn('verified_phone_profile_sync_warning', profileErr);
+            studentId = randomUUID();
+          }
+          return res.json({ success: true, studentId, phone });
+        } else if (edgeRes.error) {
+          return apiError(res, 401, 'OTP_VERIFICATION_FAILED', edgeRes.error);
+        }
+      } catch (edgeError) {
+        console.warn('supabase_edge_verify_otp_fallback', edgeError instanceof Error ? edgeError.message : String(edgeError));
+      }
+    }
+
     const supabase = getSupabase();
     if (!supabase) {
-      const cleanId = devStudentIdForPhone(phone);
-      return res.json({ success: true, studentId: cleanId, phone, devMode: true });
+      return res.json({ success: true, studentId: randomUUID(), phone, devMode: true });
     }
 
     const result = await supabase.auth.verifyOtp({ phone, token, type: 'sms' });
     if (result.error) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', result.error.message);
     if (!result.data.user) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'OTP could not be verified.');
 
-    return res.json({ success: true, studentId: result.data.user.id, phone: result.data.user.phone || phone });
+    return res.json({
+      success: true,
+      studentId: result.data.user.id,
+      phone: result.data.user.phone || phone,
+      accessToken: result.data.session?.access_token,
+      expiresAt: result.data.session?.expires_at,
+    });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
     return handleRouteError(res, error, 'otp_verify');
@@ -1393,13 +1602,17 @@ app.get('/api/streams', async (_req, res) => {
     return res.json(SEED_CAREER_STREAMS);
   }
   try {
-    const result = await supabase.from('career_streams').select('id, code, name, description, icon_name, sort_order').eq('status', 'published').order('sort_order', { ascending: true });
+    const result = await supabase
+      .from('career_streams')
+      .select('id, code, title, description, icon_name, sort_order')
+      .eq('status', 'published')
+      .order('sort_order', { ascending: true });
     if (result.error) throw new PersistenceError('career_streams_read', result.error.message);
     return res.json(
       (result.data || []).map((stream) => ({
         id: stream.code || stream.id,
         databaseId: stream.id,
-        title: stream.name,
+        title: stream.title || (stream as { name?: string }).name || stream.code,
         description: stream.description,
         iconName: stream.icon_name,
       }))
@@ -1459,27 +1672,100 @@ app.get('/api/roles/:roleId', async (req, res) => {
   }
 });
 
+app.get('/api/me', async (req, res) => {
+  try {
+    const { user } = await requireAuthenticatedUser(req);
+    const profile = await ensureCanonicalProfile({
+      userId: user.id,
+      phone: user.phone || null,
+    });
+    return res.json({ success: true, user: { id: user.id, phone: user.phone || null, email: user.email || null }, profile });
+  } catch (error) {
+    return handleRouteError(res, error, 'me');
+  }
+});
+
+app.post('/api/career-discovery/session', async (req, res) => {
+  try {
+    const { supabase, user } = await requireAuthenticatedUser(req);
+    const branch = optionalString(req.query.branch);
+    const bodyBranch = optionalString(req.body?.branch);
+    const academicYear = normalizedAcademicYear(req.body?.academicYear);
+    const careerIntent = optionalString(req.body?.careerIntent);
+    const profile = await ensureCanonicalProfile({
+      userId: user.id,
+      phone: user.phone || optionalString(req.body?.phone) || null,
+      department: bodyBranch || branch || null,
+      academicYear,
+      careerIntent: careerIntent || null,
+    });
+    const state = await startOrResumeDiscoverySession(createSupabaseDiscoveryStore(supabase), {
+      userId: user.id,
+      profileId: String(profile.id),
+      branch: optionalString(profile.department) || bodyBranch || branch || null,
+      academicYear: normalizedAcademicYear(profile.academic_year) || academicYear,
+      careerIntent: optionalString(profile.career_intent) || careerIntent || null,
+    });
+    logDiscoveryTransition(state.completedQuestionKeys.length === 0 ? 'career_discovery_session_created' : 'career_discovery_session_resumed', {
+      userId: user.id,
+      sessionId: state.sessionId,
+      currentQuestionKey: state.currentQuestion?.key || null,
+      stateVersion: state.stateVersion,
+    });
+    return res.json({
+      success: true,
+      sessionId: state.sessionId,
+      status: state.status,
+      currentQuestion: state.currentQuestion,
+      nextQuestion: state.currentQuestion,
+      completedQuestionKeys: state.completedQuestionKeys,
+      stateVersion: state.stateVersion,
+      profile: state.profile,
+      completed: state.completed,
+      persisted: true,
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'career_discovery_session');
+  }
+});
+
 app.get('/api/career-discovery', async (req, res) => {
   try {
-    const studentId = optionalString(req.query.studentId);
+    const { supabase, user } = await requireAuthenticatedUser(req);
     const branch = optionalString(req.query.branch);
     const academicYear = normalizedAcademicYear(req.query.academicYear);
     const careerIntent = optionalString(req.query.careerIntent);
-    const loaded = await loadDiscoveryProfile(studentId, { branch, academicYear, careerIntent });
-    const roles = (await getPublishedRoles()).map(mapDiscoveryRole);
-    const context = {
-      branch: loaded.branch,
-      academicYear: loaded.academicYear,
-      careerIntent: loaded.careerIntent,
-      profile: loaded.careerDiscoveryProfile,
-    };
-    const nextQuestion = nextDiscoveryQuestion(context, roles);
+    const profile = await ensureCanonicalProfile({
+      userId: user.id,
+      phone: user.phone || optionalString(req.query.phone) || null,
+      department: branch || null,
+      academicYear,
+      careerIntent: careerIntent || null,
+    });
+    const state = await startOrResumeDiscoverySession(createSupabaseDiscoveryStore(supabase), {
+      userId: user.id,
+      profileId: String(profile.id),
+      branch: optionalString(profile.department) || branch || null,
+      academicYear: normalizedAcademicYear(profile.academic_year) || academicYear,
+      careerIntent: optionalString(profile.career_intent) || careerIntent || null,
+    });
+    logDiscoveryTransition('career_discovery_session_resumed', {
+      userId: user.id,
+      sessionId: state.sessionId,
+      currentQuestionKey: state.currentQuestion?.key || null,
+      stateVersion: state.stateVersion,
+    });
     return res.json({
       success: true,
-      profile: loaded.careerDiscoveryProfile,
-      nextQuestion,
-      completed: !nextQuestion,
-      persisted: loaded.persisted,
+      sessionId: state.sessionId,
+      status: state.status,
+      currentQuestion: state.currentQuestion,
+      nextQuestion: state.currentQuestion,
+      completedQuestionKeys: state.completedQuestionKeys,
+      stateVersion: state.stateVersion,
+      profile: state.profile,
+      completed: state.completed,
+      persisted: true,
     });
   } catch (error) {
     return handleRouteError(res, error, 'career_discovery_state');
@@ -1488,54 +1774,59 @@ app.get('/api/career-discovery', async (req, res) => {
 
 app.post('/api/career-discovery/answer', async (req, res) => {
   try {
-    const studentId = optionalString(req.body?.studentId);
-    const phone = optionalString(req.body?.phone);
-    const branch = optionalString(req.body?.branch);
-    const academicYear = normalizedAcademicYear(req.body?.academicYear);
-    const careerIntent = optionalString(req.body?.careerIntent);
+    const { supabase, user } = await requireAuthenticatedUser(req);
+    await ensureCanonicalProfile({
+      userId: user.id,
+      phone: user.phone || optionalString(req.body?.phone) || null,
+      department: optionalString(req.body?.branch) || null,
+      academicYear: normalizedAcademicYear(req.body?.academicYear),
+      careerIntent: optionalString(req.body?.careerIntent) || null,
+    });
+    const discoverySessionId = requiredString(req.body?.discoverySessionId || req.body?.sessionId, 'discoverySessionId');
     const questionKey = requiredString(req.body?.questionKey, 'questionKey') as DiscoveryQuestionKey;
     const answer = requiredString(req.body?.answer, 'answer');
+    const clientMessageId = requiredString(req.body?.clientMessageId || req.body?.clientAnswerId, 'clientMessageId');
+    const stateVersion = Number(req.body?.stateVersion);
+    if (!Number.isInteger(stateVersion) || stateVersion < 1) {
+      return apiError(res, 400, 'INVALID_REQUEST', 'stateVersion must be a positive integer.');
+    }
     const allowedKeys = new Set(['interests', 'skills', 'projects', 'strengths', 'workPreference', 'itSwitch']);
     if (!allowedKeys.has(questionKey)) return apiError(res, 400, 'INVALID_DISCOVERY_QUESTION', 'Discovery question key is not supported.');
 
-    const loaded = await loadDiscoveryProfile(studentId, { branch, academicYear, careerIntent });
-    const roles = (await getPublishedRoles()).map(mapDiscoveryRole);
-    const mergedProfile = mergeDiscoveryAnswer(loaded.careerDiscoveryProfile, questionKey, answer);
-    const nextQuestion = nextDiscoveryQuestion({
-      branch: loaded.branch,
-      academicYear: loaded.academicYear,
-      careerIntent: loaded.careerIntent,
-      profile: mergedProfile,
-    }, roles);
-    const finalProfile = { ...mergedProfile, completed: !nextQuestion };
-    const persisted = await persistDiscoveryProfile(loaded.profileId, finalProfile) ||
-      persistDevDiscoveryProfile(studentId, finalProfile);
-    const supabase = getSupabase();
-    if (supabase) {
-      await persistTranscriptLog(supabase, {
-        flow: 'discovery',
-        eventType: 'discovery_answer',
-        studentId,
-        phone,
-        questionKey,
-        actor: 'user',
-        content: answer,
-        inputMode: optionalString(req.body?.inputMethod) || 'unknown',
-        metadata: {
-          branch: loaded.branch,
-          academicYear: loaded.academicYear,
-          careerIntent: loaded.careerIntent,
-          completed: !nextQuestion,
-        },
-      }).catch((error) => console.warn('career_discovery_transcript_log_notice', error instanceof Error ? error.message : error));
-    }
+    const result = await submitDiscoveryAnswer(createSupabaseDiscoveryStore(supabase), {
+      userId: user.id,
+      discoverySessionId,
+      questionKey,
+      answer,
+      clientMessageId,
+      stateVersion,
+      inputMode: optionalString(req.body?.inputMode || req.body?.inputMethod) || 'unknown',
+    });
+    const profileRow = await supabase.from('profiles').select('id').eq('user_id', user.id).maybeSingle();
+    if (profileRow.data?.id) await persistDiscoveryProfile(String(profileRow.data.id), result.profile);
+    logDiscoveryTransition(result.completed ? 'career_discovery_completed' : 'career_discovery_answer_accepted', {
+      userId: user.id,
+      sessionId: result.sessionId,
+      questionKey,
+      nextQuestionKey: result.nextQuestion?.key || null,
+      clientMessageId,
+      stateVersionBefore: stateVersion,
+      stateVersionAfter: result.stateVersion,
+    });
 
     return res.json({
       success: true,
-      profile: finalProfile,
-      nextQuestion,
-      completed: !nextQuestion,
-      persisted,
+      accepted: true,
+      sessionId: result.sessionId,
+      status: result.status,
+      profile: result.profile,
+      completedQuestion: result.completedQuestion,
+      completedQuestionKeys: result.completedQuestionKeys,
+      currentQuestion: result.currentQuestion,
+      nextQuestion: result.nextQuestion,
+      completed: result.completed,
+      stateVersion: result.stateVersion,
+      persisted: true,
     });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
@@ -1829,6 +2120,8 @@ app.get('/api/audit/:auditId/session', async (req, res) => {
     return res.json({
       success: true,
       auditId: devSession.id,
+      auditSessionId: devSession.id,
+      auditSessionRef: devSession.id,
       studentId: devSession.user_id,
       targetRoleId: devSession.target_role_id,
       status: devSession.status,
@@ -1844,62 +2137,34 @@ app.get('/api/audit/:auditId/session', async (req, res) => {
       devMode: true,
     });
   }
-  if (requestedAuditId.startsWith('dev_audit_')) {
-    return apiError(res, 404, 'DEV_AUDIT_EXPIRED', 'This local dev audit session expired after the server restarted. Start a new audit.');
+  if (!UUID_RE.test(requestedAuditId)) {
+    return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
   }
   const supabase = await requireDatabase(res);
   if (!supabase) return;
   try {
-    const auditId = requestedAuditId;
-    const session = await getAuditSession(supabase, auditId);
+    const session = await getAuditSession(supabase, requestedAuditId);
     let targetRole: Record<string, unknown> | null = null;
-    let competencyModel: Record<string, unknown> | null = null;
-
-    if (session.target_role_id) {
-      const role = await loadRole(supabase, session.target_role_id);
-      if (role) {
-        const skills = await loadRoleSkills(supabase, [session.target_role_id]);
-        targetRole = mapRole(role, skills);
-      }
-      competencyModel = await loadCompetencyModel(supabase, session.target_role_id);
+    const targetRoleId = session.target_role_id;
+    if (targetRoleId) {
+      const role = await loadRole(supabase, targetRoleId);
+      const skills = await loadRoleSkills(supabase, [targetRoleId]);
+      targetRole = mapRole(role, skills);
     }
-
-    const messages = await loadAuditMessages(supabase, auditId);
-    const rawSignals = await supabase
-      .from('audit_skill_signals')
-      .select('id,skill_slug,skill_name,extracted_level,confidence_score,evidence_strength,source,created_at')
-      .eq('session_id', auditId)
-      .order('created_at', { ascending: true });
-
-    const coreCompetencies = (competencyModel?.core_competencies || []) as Array<Record<string, unknown>>;
-    const signals = (rawSignals.data || []) as Array<Record<string, unknown>>;
-
-    const evidenceCoverage = coreCompetencies.map((comp) => {
-      const skillName = String(comp.skillName || comp.skill_name || '');
-      const skillSignals = signals.filter(
-        (s) => String(s.skill_name).toLowerCase() === skillName.toLowerCase()
-      );
-      const strongestSignal = skillSignals[skillSignals.length - 1];
-      const strength = (strongestSignal?.evidence_strength as string) || 'None';
-      let status = 'Insufficient Evidence';
-      if (strength === 'Strong') status = 'Strong Evidence';
-      else if (strength === 'Moderate') status = 'Moderate Evidence';
-      else if (strength === 'Weak') status = 'Weak Evidence';
-
-      return {
-        skillId: String(comp.skillId || comp.skill_id || skillName),
-        skillName,
-        category: String(comp.category || 'Core'),
-        expectedScore: Number(comp.expectedScore || comp.expected_score || 70),
-        evidenceStrength: strength,
-        evidenceStatus: status,
-        confidenceScore: strongestSignal ? Number(strongestSignal.confidence_score || 0) : 0,
-        observationsCount: skillSignals.length,
-      };
-    });
+    const messages = await loadAuditMessages(supabase, requestedAuditId);
+    const evidenceList = await loadAuditEvidence(supabase, requestedAuditId);
+    const evidenceCoverage = evidenceList.map((e) => ({
+      skillId: e.source_message_id || e.id,
+      skillName: e.evidence_type,
+      evidenceLevel: (e.evidence_strength || 'None') as 'Strong' | 'Moderate' | 'Weak' | 'None',
+      reasoning: e.raw_text || '',
+    }));
 
     return res.json({
+      success: true,
       auditId: session.id,
+      auditSessionId: session.id,
+      auditSessionRef: session.id,
       studentId: session.user_id,
       targetRoleId: session.target_role_id,
       status: session.status,
@@ -1921,66 +2186,55 @@ app.get('/api/audit/:auditId/session', async (req, res) => {
 
 app.post('/api/audit/session', async (req, res) => {
   try {
-    const studentId = requiredString(req.body?.studentId, 'studentId');
+    let studentId = requiredString(req.body?.studentId, 'studentId');
     const targetRoleId = requiredString(req.body?.targetRoleId, 'targetRoleId');
     const context = isRecord(req.body?.context) ? req.body.context : {};
     if (!UUID_RE.test(targetRoleId)) return apiError(res, 400, 'INVALID_REQUEST', 'targetRoleId must be a UUID.');
-    if (!UUID_RE.test(studentId)) {
-      const idempotencyKey = optionalString(req.body?.idempotencyKey);
-      const existing = idempotencyKey
-        ? [...devAuditSessions.values()].find((session) => session.user_id === studentId && session.context.idempotencyKey === idempotencyKey)
-        : undefined;
-      const session = existing || {
-        id: `dev_audit_${randomUUID()}`,
-        user_id: studentId,
-        target_role_id: targetRoleId,
-        status: 'created',
-        context: { ...context, idempotencyKey },
-        messages: [],
-      };
-      devAuditSessions.set(session.id, session);
-      const supabase = getSupabase();
-      if (supabase) {
-        await persistTranscriptLog(supabase, {
-          flow: 'audit',
-          eventType: 'audit_session_created',
-          studentId,
-          phone: typeof context.phone === 'string' ? context.phone : null,
-          auditId: session.id,
-          targetRoleId,
-          actor: 'system',
-          content: 'Audit session created for non-UUID identity.',
-          inputMode: 'system',
-          metadata: { ...context, devMode: true },
-        }).catch((error) => console.warn('dev_audit_session_transcript_log_notice', error instanceof Error ? error.message : error));
-      }
+
+    const supabase = getSupabase();
+    if (supabase) {
+      studentId = await ensureVerifiedUser(studentId, typeof context.phone === 'string' ? context.phone : null);
+
+      const role = await supabase.from('career_roles').select('id').eq('id', targetRoleId).eq('status', 'published').maybeSingle();
+      if (role.error) throw new PersistenceError('audit_session_role_read', role.error.message);
+      if (!role.data) return apiError(res, 404, 'TARGET_ROLE_NOT_FOUND', 'Selected target role is not published.');
+      const session = await createOrResumeAuditSession(supabase, {
+        studentId,
+        targetRoleId,
+        idempotencyKey: optionalString(req.body?.idempotencyKey),
+        context,
+      });
       return res.status(201).json({
         success: true,
         auditId: session.id,
+        auditSessionId: session.id,
+        auditSessionRef: session.id,
         studentId: session.user_id,
         targetRoleId: session.target_role_id,
         status: session.status,
-        devMode: true,
       });
     }
 
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
-    const role = await supabase.from('career_roles').select('id').eq('id', targetRoleId).eq('status', 'published').maybeSingle();
-    if (role.error) throw new PersistenceError('audit_session_role_read', role.error.message);
-    if (!role.data) return apiError(res, 404, 'TARGET_ROLE_NOT_FOUND', 'Selected target role is not published.');
-    const session = await createOrResumeAuditSession(supabase, {
-      studentId,
-      targetRoleId,
-      idempotencyKey: optionalString(req.body?.idempotencyKey),
+    const sessionUuid = randomUUID();
+    const canonicalStudentUuid = UUID_RE.test(studentId) ? studentId : randomUUID();
+    const session = {
+      id: sessionUuid,
+      user_id: canonicalStudentUuid,
+      target_role_id: targetRoleId,
+      status: 'created',
       context,
-    });
+      messages: [],
+    };
+    devAuditSessions.set(session.id, session);
     return res.status(201).json({
       success: true,
       auditId: session.id,
+      auditSessionId: session.id,
+      auditSessionRef: session.id,
       studentId: session.user_id,
       targetRoleId: session.target_role_id,
       status: session.status,
+      devMode: true,
     });
   } catch (error) {
     return handleRouteError(res, error, 'audit_session_create');
@@ -2227,13 +2481,6 @@ Speak in 1-2 conversational sentences.`,
     const qalamText = transition.questionText;
     const qalamState = transition.action === 'COMPLETE' ? 'CELEBRATING' : transition.action === 'FOLLOW_UP' ? 'CURIOUS' : 'ENCOURAGING';
 
-    const evidenceUpdate = await supabase
-      .from('audit_evidence')
-      .update({ primary_signal_id: null })
-      .eq('session_id', auditId)
-      .eq('source_message_id', userMessage.id);
-    if (evidenceUpdate.error) throw new PersistenceError('chat_evidence_update', evidenceUpdate.error.message);
-
     const qalamMessage = await persistAuditMessage(supabase, {
       auditId,
       studentId: session.user_id,
@@ -2362,10 +2609,21 @@ app.post('/api/audit/evidence/signal', async (req, res) => {
 });
 
 app.post('/api/audit/:auditId/evidence', async (req, res) => {
-  const supabase = await requireDatabase(res);
-  if (!supabase) return;
   try {
     const auditId = requiredString(req.params.auditId, 'auditId');
+    const devSession = devAuditSessions.get(auditId);
+    if (devSession) {
+      const evidenceId = `dev_evidence_${randomUUID()}`;
+      return res.status(201).json({ success: true, evidenceId, devMode: true });
+    }
+
+    if (!UUID_RE.test(auditId)) {
+      return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
+    }
+
+    const supabase = await requireDatabase(res);
+    if (!supabase) return;
+
     const session = await getAuditSession(supabase, auditId);
     const evidenceType = requiredString(req.body?.evidenceType, 'evidenceType');
     const rawText = requiredString(req.body?.rawText, 'rawText');
@@ -2397,6 +2655,7 @@ app.post('/api/audit/:auditId/finalize', async (req, res) => {
       return res.json({
         success: true,
         auditId,
+        auditSessionId: auditId,
         targetRoleId: devSession.target_role_id,
         targetRole: roleTitle,
         overallScore: 58,
@@ -2486,11 +2745,20 @@ app.post('/api/audit/:auditId/finalize', async (req, res) => {
       });
     }
 
+    if (!UUID_RE.test(auditId)) {
+      return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
+    }
+
     const supabase = await requireDatabase(res);
     if (!supabase) return;
-    if (!serverConfig.geminiConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
+    if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const report = await finalizeCareerAudit(supabase, auditId);
-    return res.json(report);
+    return res.json({
+      success: true,
+      ...report,
+      auditSessionId: auditId,
+      auditSessionRef: auditId,
+    });
   } catch (error) {
     return handleRouteError(res, error, 'audit_finalize');
   }
@@ -2500,10 +2768,17 @@ app.post('/api/qalam/evaluate', async (req, res) => {
   const supabase = await requireDatabase(res);
   if (!supabase) return;
   try {
-    if (!serverConfig.geminiConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
+    if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const auditId = requiredString(req.body?.auditId, 'auditId');
+    if (!UUID_RE.test(auditId)) {
+      return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
+    }
     const report = await finalizeCareerAudit(supabase, auditId);
-    return res.json(report);
+    return res.json({
+      ...report,
+      auditSessionId: auditId,
+      auditSessionRef: auditId,
+    });
   } catch (error) {
     if (error instanceof Error && /auditId is required/.test(error.message)) return apiError(res, 400, 'AUDIT_ID_REQUIRED', error.message);
     return handleRouteError(res, error, 'qalam_evaluate');
@@ -2511,24 +2786,94 @@ app.post('/api/qalam/evaluate', async (req, res) => {
 });
 
 app.get('/api/audit/:auditId/report', async (req, res) => {
-  const supabase = await requireDatabase(res);
-  if (!supabase) return;
   try {
-    const report = await getPersistedReport(supabase, requiredString(req.params.auditId, 'auditId'));
+    const auditId = requiredString(req.params.auditId, 'auditId');
+    const devSession = devAuditSessions.get(auditId);
+    if (devSession || auditId.startsWith('dev_audit_')) {
+      const targetRoleId = devSession?.target_role_id || 'dev_role_1';
+      const targetRole = await resolveGuidanceRole(targetRoleId, String(devSession?.context?.branch || 'Engineering'));
+      const roleTitle = targetRole.title || String(devSession?.context?.targetRole || 'Career Specialist');
+      const keySkill = targetRole.keySkills[0] || 'Domain Fundamentals';
+      return res.json({
+        auditId,
+        auditSessionId: auditId,
+        auditSessionRef: auditId,
+        targetRoleId,
+        targetRole: roleTitle,
+        overallScore: 58,
+        readinessStatus: 'Developing',
+        hiringBenchmark: 75,
+        distanceFromBenchmark: 17,
+        dimensionScores: {
+          careerClarity: 68,
+          technicalReadiness: 55,
+          projectReadiness: 50,
+          communication: 62,
+          placementReadiness: 54,
+          executionReadiness: 60,
+        },
+        diagnosisSummary: `Evaluation completed for ${roleTitle}.`,
+        whyRoleFits: [`${roleTitle} matches the selected career direction.`],
+        strengths: [{ skillId: 'dev_strength_1', skillName: keySkill, demonstratedScore: 60, evidence: 'Conversational evidence', confidenceScore: 65, whyItMatters: `${keySkill} is a core competency.` }],
+        gaps: [{ gapId: 'dev_gap_1', skillId: 'dev_skill_1', skillName: targetRole.keySkills[1] || 'Project Evidence', expectedScore: 75, demonstratedScore: 45, gap: 30, priorityWeight: 80, weightedGap: 24, priority: 'High', evidenceIds: [], signalIds: [], evidenceBasis: 'No project evidence.', recommendedAction: 'Add project.', mappingStatus: 'UNMAPPED', recommendedStageIds: [] }],
+        evidenceLedger: [],
+        devMode: true,
+      });
+    }
+
+    if (!UUID_RE.test(auditId)) {
+      return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
+    }
+
+    const supabase = await requireDatabase(res);
+    if (!supabase) return;
+
+    const report = await getPersistedReport(supabase, auditId);
     if (!report) return apiError(res, 404, 'REPORT_NOT_FOUND', 'Career audit report has not been finalized.');
-    return res.json(report);
+    return res.json({
+      ...report,
+      auditSessionId: auditId,
+      auditSessionRef: auditId,
+    });
   } catch (error) {
     return handleRouteError(res, error, 'audit_report');
   }
 });
 
 app.get('/api/audit/:auditId/roadmap-handoff', async (req, res) => {
-  const supabase = await requireDatabase(res);
-  if (!supabase) return;
   try {
-    const handoff = await getPersistedHandoff(supabase, requiredString(req.params.auditId, 'auditId'));
+    const auditId = requiredString(req.params.auditId, 'auditId');
+    const devSession = devAuditSessions.get(auditId);
+    if (devSession || auditId.startsWith('dev_audit_')) {
+      return res.json({
+        success: true,
+        auditId,
+        auditSessionId: auditId,
+        auditSessionRef: auditId,
+        studentId: devSession?.user_id || 'dev_user_1',
+        targetRoleId: devSession?.target_role_id || 'dev_role_1',
+        targetRole: String(devSession?.context?.targetRole || 'Career Specialist'),
+        status: 'HANDOFF_GENERATED',
+        gaps: [],
+        devMode: true,
+      });
+    }
+
+    if (!UUID_RE.test(auditId)) {
+      return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
+    }
+
+    const supabase = await requireDatabase(res);
+    if (!supabase) return;
+
+    const handoff = await getPersistedHandoff(supabase, auditId);
     if (!handoff) return apiError(res, 404, 'HANDOFF_NOT_FOUND', 'Career audit roadmap handoff has not been generated.');
-    return res.json({ success: true, ...handoff });
+    return res.json({
+      success: true,
+      ...handoff,
+      auditSessionId: auditId,
+      auditSessionRef: auditId,
+    });
   } catch (error) {
     return handleRouteError(res, error, 'audit_handoff');
   }

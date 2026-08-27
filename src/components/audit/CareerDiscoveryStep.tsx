@@ -35,9 +35,12 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
   const [messages, setMessages] = useState<Array<{ sender: 'qalam' | 'user'; text: string }>>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<DiscoveryQuestionDto | null>(null);
+  const [discoverySessionId, setDiscoverySessionId] = useState<string | null>(null);
+  const [stateVersion, setStateVersion] = useState<number | null>(null);
   const [discoveryProfile, setDiscoveryProfile] = useState<Record<string, unknown>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const onIntentProcessedRef = useRef(onIntentProcessed);
+  const turnSubmissionInFlight = useRef(false);
 
   const initialPrompt = currentQuestion?.prompt || `Hello ${firstName || 'there'}! I am preparing questions for your branch.`;
   const isMechanical = /mechanical|mech/i.test(departmentName || '');
@@ -81,12 +84,14 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
     getCareerDiscoveryState({ studentId, phone, branch: departmentName, academicYear })
       .then((state) => {
         if (!isMounted) return;
+        setDiscoverySessionId(state.sessionId);
+        setStateVersion(state.stateVersion);
         setDiscoveryProfile(state.profile || {});
-        setCurrentQuestion(state.nextQuestion);
-        const prompt = state.nextQuestion?.prompt || 'I have enough discovery signals to recommend career directions.';
+        setCurrentQuestion(state.currentQuestion || state.nextQuestion);
+        const prompt = (state.currentQuestion || state.nextQuestion)?.prompt || 'I have enough discovery signals to recommend career directions.';
         setMessages([{ sender: 'qalam', text: prompt }]);
         speakText(prompt);
-        if (!state.nextQuestion) {
+        if (!state.currentQuestion && !state.nextQuestion) {
           onIntentProcessedRef.current({
             userRawIntent: String(state.profile?.explicitCareerIntent || state.profile?.interests?.join(', ') || ''),
             knownSkills: Array.isArray(state.profile?.skills) ? state.profile.skills : [],
@@ -104,16 +109,20 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
     };
   }, [studentId, phone, departmentName, academicYear, careerStreamId, speakText, stopSpeaking, trackEvent]);
 
-  const handleSubmit = async (textToSubmit?: string) => {
+  const finalizeUserTurn = async (textToSubmit?: string) => {
     const text = (textToSubmit || inputText || transcript).trim();
-    if (!text || isProcessing || !currentQuestion) return;
+    if (!text || isProcessing || turnSubmissionInFlight.current || !currentQuestion || !discoverySessionId || stateVersion == null) return;
 
+    turnSubmissionInFlight.current = true;
     stopListening();
     stopSpeaking();
     setIsProcessing(true);
+    const clientMessageId = crypto.randomUUID();
+    const submittedQuestion = currentQuestion;
+    const submittedStateVersion = stateVersion;
 
     trackEvent('discovery_question_answered', {
-      questionKey: currentQuestion.key,
+      questionKey: submittedQuestion.key,
       answerLength: text.length,
       inputMethod: isListening ? 'voice' : 'type',
     });
@@ -127,15 +136,22 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
         phone,
         branch: departmentName,
         academicYear,
-        questionKey: currentQuestion.key,
+        discoverySessionId,
+        questionKey: submittedQuestion.key,
         answer: text,
+        clientMessageId,
+        stateVersion: submittedStateVersion,
         inputMethod: isListening ? 'voice' : 'type',
+        inputMode: isListening ? 'voice' : 'type',
       });
+      setDiscoverySessionId(state.sessionId);
+      setStateVersion(state.stateVersion);
       setDiscoveryProfile(state.profile || {});
-      setCurrentQuestion(state.nextQuestion);
-      if (state.nextQuestion) {
-        setMessages((prev) => [...prev, { sender: 'qalam', text: state.nextQuestion!.prompt }]);
-        speakText(state.nextQuestion.prompt);
+      const nextQuestion = state.currentQuestion || state.nextQuestion;
+      setCurrentQuestion(nextQuestion);
+      if (nextQuestion) {
+        setMessages((prev) => [...prev, { sender: 'qalam', text: nextQuestion.prompt }]);
+        speakText(nextQuestion.prompt);
       } else {
         const profile = state.profile || {};
         const intent = String(
@@ -155,6 +171,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
       const message = err instanceof Error ? err.message : 'Could not save this discovery answer.';
       setLoadError(message);
     } finally {
+      turnSubmissionInFlight.current = false;
       setIsProcessing(false);
     }
   };
@@ -200,7 +217,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
                 type="button"
                 onClick={() => {
                   setInputText(chip);
-                  handleSubmit(chip);
+                  finalizeUserTurn(chip);
                 }}
                 disabled={isProcessing}
                 className="text-[10px] px-2.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-[#1f3861] hover:bg-blue-50 text-slate-700 font-medium transition cursor-pointer active:scale-95 disabled:opacity-50 text-left"
@@ -242,7 +259,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleSubmit();
+              finalizeUserTurn();
             }}
             className="flex gap-2"
           >

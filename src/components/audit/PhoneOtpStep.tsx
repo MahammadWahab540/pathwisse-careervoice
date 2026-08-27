@@ -131,6 +131,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
         countryCode: selectedCountry.code,
         isOtpVerified: true,
         studentId: data.studentId,
+        accessToken: typeof data.accessToken === 'string' ? data.accessToken : undefined,
         anonymousId: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
       });

@@ -9,6 +9,7 @@ export interface OtpVerifyResponse {
   success: boolean;
   studentId: string;
   phone: string;
+  accessToken?: string;
 }
 
 export async function requestOtp(phone: string): Promise<OtpRequestResponse> {
