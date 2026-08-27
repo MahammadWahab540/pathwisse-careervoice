@@ -11,6 +11,7 @@ import {
 
 interface CareerDiscoveryStepProps {
   studentId?: string;
+  phone?: string;
   firstName: string;
   departmentName: string;
   careerStreamId: string;
@@ -22,6 +23,7 @@ interface CareerDiscoveryStepProps {
 
 export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
   studentId,
+  phone,
   firstName,
   departmentName,
   careerStreamId,
@@ -76,7 +78,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
     let isMounted = true;
     trackEvent('career_discovery_started', { departmentName, careerStreamId });
     setLoadError(null);
-    getCareerDiscoveryState({ studentId, branch: departmentName, academicYear })
+    getCareerDiscoveryState({ studentId, phone, branch: departmentName, academicYear })
       .then((state) => {
         if (!isMounted) return;
         setDiscoveryProfile(state.profile || {});
@@ -100,7 +102,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
       isMounted = false;
       stopSpeaking();
     };
-  }, [studentId, departmentName, academicYear, careerStreamId, speakText, stopSpeaking, trackEvent]);
+  }, [studentId, phone, departmentName, academicYear, careerStreamId, speakText, stopSpeaking, trackEvent]);
 
   const handleSubmit = async (textToSubmit?: string) => {
     const text = (textToSubmit || inputText || transcript).trim();
@@ -122,10 +124,12 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
     try {
       const state = await submitCareerDiscoveryAnswer({
         studentId,
+        phone,
         branch: departmentName,
         academicYear,
         questionKey: currentQuestion.key,
         answer: text,
+        inputMethod: isListening ? 'voice' : 'type',
       });
       setDiscoveryProfile(state.profile || {});
       setCurrentQuestion(state.nextQuestion);

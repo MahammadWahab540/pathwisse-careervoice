@@ -49,6 +49,7 @@ import {
   persistAuditMessage,
   persistSkillSignal,
   persistTextEvidence,
+  persistTranscriptLog,
   PersistenceError,
   updateAuditSession,
 } from './src/server/auditRepository';
@@ -128,8 +129,10 @@ function validateServiceBearer(req: express.Request): boolean {
 
 function normalizePhoneForOtp(value: string): string {
   const trimmed = value.trim();
-  const prefix = trimmed.startsWith('+') ? '+' : '';
-  return `${prefix}${trimmed.replace(/\D/g, '')}`;
+  const digits = trimmed.replace(/\D/g, '');
+  if (trimmed.startsWith('+')) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
 }
 
 function whatsappRecipientPhone(value: string): string {
@@ -150,6 +153,25 @@ function isOtpTestPhoneAllowed(phone: string): boolean {
   return serverConfig.otpTestPhoneAllowlist
     .map(normalizePhoneForOtp)
     .includes(normalized);
+}
+
+async function getOtpTestCodeForPhone(phone: string): Promise<string | null> {
+  const normalized = normalizePhoneForOtp(phone);
+  if (isOtpTestPhoneAllowed(normalized)) return serverConfig.otpTestCode;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const result = await supabase
+    .from('otp_test_phone_allowlist')
+    .select('test_code')
+    .eq('phone', normalized)
+    .eq('active', true)
+    .maybeSingle();
+  if (result.error) {
+    console.warn('otp_test_allowlist_lookup_notice', result.error.message);
+    return null;
+  }
+  const testCode = typeof result.data?.test_code === 'string' ? result.data.test_code : null;
+  return testCode && /^\d{6}$/.test(testCode) ? testCode : null;
 }
 
 function devStudentIdForPhone(phone: string): string {
@@ -1158,6 +1180,7 @@ app.post('/api/voice/session', async (req, res) => {
     const targetRole = requiredString(req.body?.targetRole, 'targetRole');
     const studentName = optionalString(req.body?.studentName) || 'Candidate';
     const studentId = optionalString(req.body?.studentId);
+    const phone = optionalString(req.body?.phone);
     const transport = optionalString(req.body?.transport) || 'daily';
 
     const serviceToken = voiceServiceToken();
@@ -1248,8 +1271,9 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return apiError(res, 400, 'INVALID_PHONE', 'Enter a valid phone number with country code.');
     }
 
-    if (isOtpTestPhoneAllowed(phone)) {
-      console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${serverConfig.otpTestCode}`);
+    const testCode = await getOtpTestCodeForPhone(phone);
+    if (testCode) {
+      console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${testCode}`);
       return res.json({ success: true, phone, devMode: true });
     }
 
@@ -1288,7 +1312,8 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     const token = requiredString(req.body?.token, 'token');
     if (!/^\d{6}$/.test(token)) return apiError(res, 400, 'INVALID_OTP', 'Enter the 6-digit verification code.');
 
-    if (isOtpTestPhoneAllowed(phone) && token === serverConfig.otpTestCode) {
+    const testCode = await getOtpTestCodeForPhone(phone);
+    if (testCode && token === testCode) {
       return res.json({
         success: true,
         studentId: devStudentIdForPhone(phone),
@@ -1464,6 +1489,7 @@ app.get('/api/career-discovery', async (req, res) => {
 app.post('/api/career-discovery/answer', async (req, res) => {
   try {
     const studentId = optionalString(req.body?.studentId);
+    const phone = optionalString(req.body?.phone);
     const branch = optionalString(req.body?.branch);
     const academicYear = normalizedAcademicYear(req.body?.academicYear);
     const careerIntent = optionalString(req.body?.careerIntent);
@@ -1484,6 +1510,25 @@ app.post('/api/career-discovery/answer', async (req, res) => {
     const finalProfile = { ...mergedProfile, completed: !nextQuestion };
     const persisted = await persistDiscoveryProfile(loaded.profileId, finalProfile) ||
       persistDevDiscoveryProfile(studentId, finalProfile);
+    const supabase = getSupabase();
+    if (supabase) {
+      await persistTranscriptLog(supabase, {
+        flow: 'discovery',
+        eventType: 'discovery_answer',
+        studentId,
+        phone,
+        questionKey,
+        actor: 'user',
+        content: answer,
+        inputMode: optionalString(req.body?.inputMethod) || 'unknown',
+        metadata: {
+          branch: loaded.branch,
+          academicYear: loaded.academicYear,
+          careerIntent: loaded.careerIntent,
+          completed: !nextQuestion,
+        },
+      }).catch((error) => console.warn('career_discovery_transcript_log_notice', error instanceof Error ? error.message : error));
+    }
 
     return res.json({
       success: true,
@@ -1894,6 +1939,21 @@ app.post('/api/audit/session', async (req, res) => {
         messages: [],
       };
       devAuditSessions.set(session.id, session);
+      const supabase = getSupabase();
+      if (supabase) {
+        await persistTranscriptLog(supabase, {
+          flow: 'audit',
+          eventType: 'audit_session_created',
+          studentId,
+          phone: typeof context.phone === 'string' ? context.phone : null,
+          auditId: session.id,
+          targetRoleId,
+          actor: 'system',
+          content: 'Audit session created for non-UUID identity.',
+          inputMode: 'system',
+          metadata: { ...context, devMode: true },
+        }).catch((error) => console.warn('dev_audit_session_transcript_log_notice', error instanceof Error ? error.message : error));
+      }
       return res.status(201).json({
         success: true,
         auditId: session.id,
@@ -1938,6 +1998,7 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
     const expectedStateVersion = typeof req.body?.stateVersion === 'number' ? Number(req.body.stateVersion) : undefined;
     const explicitSkip = req.body?.action === 'SKIP' || req.body?.explicitSkip === true || inputMethod === 'tap';
     const legacyNextQuestion = optionalString(req.body?.nextQuestion) || '';
+    const legacyCurrentStage = optionalString(req.body?.currentStage) || 'dev_audit_turn';
 
     const devSession = devAuditSessions.get(auditId);
     if (devSession) {
@@ -1959,6 +2020,39 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
         input_mode: 'system',
       });
       devSession.status = 'in_progress';
+      const supabase = getSupabase();
+      if (supabase) {
+        await persistTranscriptLog(supabase, {
+          flow: 'audit',
+          eventType: 'audit_chat_turn',
+          studentId: devSession.user_id,
+          phone: typeof devSession.context.phone === 'string' ? devSession.context.phone : null,
+          auditId,
+          targetRoleId,
+          questionKey: legacyCurrentStage,
+          actor: 'user',
+          content: userText,
+          inputMode: inputMethod,
+          sequenceNo: devSession.messages.length - 1,
+          clientMessageId,
+          metadata: { targetRole, stage: legacyCurrentStage, devMode: true },
+        }).catch((error) => console.warn('dev_user_transcript_log_notice', error instanceof Error ? error.message : error));
+        await persistTranscriptLog(supabase, {
+          flow: 'audit',
+          eventType: 'audit_chat_turn',
+          studentId: devSession.user_id,
+          phone: typeof devSession.context.phone === 'string' ? devSession.context.phone : null,
+          auditId,
+          targetRoleId,
+          questionKey: legacyCurrentStage,
+          actor: 'assistant',
+          content: qalamText,
+          inputMode: 'system',
+          sequenceNo: devSession.messages.length,
+          clientMessageId: `${clientMessageId}:qalam`,
+          metadata: { targetRole, stage: legacyCurrentStage, devMode: true },
+        }).catch((error) => console.warn('dev_assistant_transcript_log_notice', error instanceof Error ? error.message : error));
+      }
       return res.json({
         success: true,
         sourceMessageId,
@@ -2014,6 +2108,27 @@ app.post(['/api/qalam/chat', '/api/ai/chat'], async (req, res) => {
         expectedStateVersion,
       },
     });
+    await persistTranscriptLog(supabase, {
+      flow: 'audit',
+      eventType: 'audit_chat_turn',
+      studentId: session.user_id,
+      phone: isRecord(session.context) && typeof session.context.phone === 'string' ? session.context.phone : null,
+      auditId,
+      targetRoleId,
+      questionKey: currentState.stage.stageId,
+      actor: 'user',
+      content: userText,
+      inputMode: inputMethod,
+      sequenceNo: userMessage.sequenceNo,
+      clientMessageId,
+      metadata: {
+        stage: currentState.stage.stageId,
+        competencyId: currentState.stage.competencyId,
+        questionId: currentState.stage.questionId,
+        targetRole,
+        expectedStateVersion,
+      },
+    }).catch((error) => console.warn('user_transcript_log_notice', error instanceof Error ? error.message : error));
 
     const noExperience = explicitSkip || isNoExperienceAnswer(userText);
     const deterministicEvidenceStrength: EvidenceStrength = noExperience ? 'None' : 'Weak';
@@ -2145,6 +2260,27 @@ Speak in 1-2 conversational sentences.`,
       state_version: transition.stateVersion,
       context: nextContext,
     });
+    await persistTranscriptLog(supabase, {
+      flow: 'audit',
+      eventType: 'audit_chat_turn',
+      studentId: session.user_id,
+      phone: isRecord(session.context) && typeof session.context.phone === 'string' ? session.context.phone : null,
+      auditId,
+      targetRoleId,
+      questionKey: transition.nextStage,
+      actor: 'assistant',
+      content: qalamText,
+      inputMode: 'system',
+      sequenceNo: qalamMessage.sequenceNo,
+      clientMessageId: `${clientMessageId}:qalam`,
+      metadata: {
+        stage: transition.nextStage,
+        evaluatedStage: transition.evaluatedStage,
+        needsFollowUp: transition.action === 'FOLLOW_UP',
+        action: transition.action,
+        stateVersion: transition.stateVersion,
+      },
+    }).catch((error) => console.warn('assistant_transcript_log_notice', error instanceof Error ? error.message : error));
 
     return res.json({
       success: true,

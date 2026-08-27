@@ -26,14 +26,17 @@ export interface CareerDiscoveryStateDto {
 
 export interface CareerDiscoveryInput {
   studentId?: string;
+  phone?: string;
   branch?: string;
   academicYear?: string | number;
   careerIntent?: string;
+  inputMethod?: 'voice' | 'type' | 'tap' | 'system' | string;
 }
 
 export async function getCareerDiscoveryState(input: CareerDiscoveryInput): Promise<CareerDiscoveryStateDto> {
   const params = new URLSearchParams();
   if (input.studentId) params.set('studentId', input.studentId);
+  if (input.phone) params.set('phone', input.phone);
   if (input.branch) params.set('branch', input.branch);
   if (input.academicYear !== undefined) params.set('academicYear', String(input.academicYear));
   if (input.careerIntent) params.set('careerIntent', input.careerIntent);
