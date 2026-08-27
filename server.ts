@@ -129,8 +129,10 @@ function validateServiceBearer(req: express.Request): boolean {
 
 function normalizePhoneForOtp(value: string): string {
   const trimmed = value.trim();
-  const prefix = trimmed.startsWith('+') ? '+' : '';
-  return `${prefix}${trimmed.replace(/\D/g, '')}`;
+  const digits = trimmed.replace(/\D/g, '');
+  if (trimmed.startsWith('+')) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
 }
 
 function whatsappRecipientPhone(value: string): string {
