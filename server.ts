@@ -153,6 +153,25 @@ function isOtpTestPhoneAllowed(phone: string): boolean {
     .includes(normalized);
 }
 
+async function getOtpTestCodeForPhone(phone: string): Promise<string | null> {
+  const normalized = normalizePhoneForOtp(phone);
+  if (isOtpTestPhoneAllowed(normalized)) return serverConfig.otpTestCode;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const result = await supabase
+    .from('otp_test_phone_allowlist')
+    .select('test_code')
+    .eq('phone', normalized)
+    .eq('active', true)
+    .maybeSingle();
+  if (result.error) {
+    console.warn('otp_test_allowlist_lookup_notice', result.error.message);
+    return null;
+  }
+  const testCode = typeof result.data?.test_code === 'string' ? result.data.test_code : null;
+  return testCode && /^\d{6}$/.test(testCode) ? testCode : null;
+}
+
 function devStudentIdForPhone(phone: string): string {
   return 'dev_user_' + normalizePhoneForOtp(phone).replace(/\D/g, '');
 }
@@ -1250,8 +1269,9 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return apiError(res, 400, 'INVALID_PHONE', 'Enter a valid phone number with country code.');
     }
 
-    if (isOtpTestPhoneAllowed(phone)) {
-      console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${serverConfig.otpTestCode}`);
+    const testCode = await getOtpTestCodeForPhone(phone);
+    if (testCode) {
+      console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${testCode}`);
       return res.json({ success: true, phone, devMode: true });
     }
 
@@ -1290,7 +1310,8 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     const token = requiredString(req.body?.token, 'token');
     if (!/^\d{6}$/.test(token)) return apiError(res, 400, 'INVALID_OTP', 'Enter the 6-digit verification code.');
 
-    if (isOtpTestPhoneAllowed(phone) && token === serverConfig.otpTestCode) {
+    const testCode = await getOtpTestCodeForPhone(phone);
+    if (testCode && token === testCode) {
       return res.json({
         success: true,
         studentId: devStudentIdForPhone(phone),
