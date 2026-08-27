@@ -42,6 +42,18 @@ import { createAuditSession, getAuditSession, uploadTextEvidence, finalizeAudit 
 import { getAuditReport } from './api/reports';
 import { getRoadmapHandoff } from './api/roadmap';
 import { trackAnalyticsEvent } from './api/analytics';
+import {
+  ACTIVE_AUDIT_ID_KEY,
+  FLOW_CHECKPOINT_KEY,
+  PHONE_KEY,
+  STUDENT_ID_KEY,
+  clearCareerVoiceAuditId,
+  logCareerVoiceEvent,
+  readCareerVoiceCheckpoint,
+  resolveInitialCheckpoint,
+  writeCareerVoiceCheckpoint,
+  type CareerVoiceStep,
+} from './domain/careerVoiceFlow';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,23 +64,7 @@ const queryClient = new QueryClient({
   },
 });
 
-export type AuditStep =
-  | 'WELCOME'
-  | 'PHONE_OTP'
-  | 'ASK_NAME'
-  | 'ASK_COLLEGE'
-  | 'ASK_DEPARTMENT'
-  | 'ASK_YEAR'
-  | 'CAREER_DISCOVERY'
-  | 'ROLE_DISCOVERY'
-  | 'ROLE_EXPLANATION'
-  | 'LOAD_COMPETENCY_MODEL'
-  | 'CAREER_READINESS_AUDIT'
-  | 'EVIDENCE_UPLOAD'
-  | 'PROCESSING'
-  | 'READINESS_REPORT'
-  | 'GAP_REPORT'
-  | 'ROADMAP';
+export type AuditStep = CareerVoiceStep;
 
 interface ApiGap {
   gapId: string;
@@ -121,8 +117,9 @@ function toCareerGap(gap: ApiGap): CareerGap {
 }
 
 function MainApp() {
-  const [currentStep, setCurrentStep] = useState<AuditStep>('WELCOME');
+  const [currentStep, setCurrentStep] = useState<AuditStep>('BOOTSTRAPPING');
   const guestSessionId = useRef(crypto.randomUUID());
+  const flowGenerationRef = useRef(0);
 
   const [identity, setIdentity] = useState<UserIdentity | null>(null);
   const [auditId, setAuditId] = useState<string | null>(null);
@@ -144,11 +141,48 @@ function MainApp() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
-  const [isRestoring, setIsRestoring] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(true);
   const [adaptiveToolCalls, setAdaptiveToolCalls] = useState<QalamToolCall[]>([]);
 
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
+
+  const persistFlowCheckpoint = useCallback(
+    (step: AuditStep, nextIdentity = identity, nextAuditId = auditId) => {
+      if (step === 'BOOTSTRAPPING') return;
+      writeCareerVoiceCheckpoint(localStorage, {
+        authenticated: Boolean(nextIdentity?.isOtpVerified || nextIdentity?.studentId),
+        identity: nextIdentity,
+        onboardingCheckpoint: step,
+        activeAuditId: nextAuditId,
+        updatedAt: new Date().toISOString(),
+        flowGeneration: flowGenerationRef.current,
+      });
+    },
+    [auditId, identity]
+  );
+
+  const transitionToStep = useCallback(
+    (to: AuditStep, reason: string, options: { nextIdentity?: UserIdentity | null; nextAuditId?: string | null; persist?: boolean } = {}) => {
+      flowGenerationRef.current += 1;
+      setCurrentStep((from) => {
+        logCareerVoiceEvent('careervoice_step_transition', {
+          from,
+          to,
+          reason,
+          studentId: options.nextIdentity?.studentId || identity?.studentId,
+          authenticated: Boolean(options.nextIdentity?.isOtpVerified || identity?.isOtpVerified),
+          auditId: options.nextAuditId ?? auditId,
+          flowGeneration: flowGenerationRef.current,
+        });
+        return to;
+      });
+      if (options.persist !== false) {
+        persistFlowCheckpoint(to, options.nextIdentity === undefined ? identity : options.nextIdentity, options.nextAuditId === undefined ? auditId : options.nextAuditId);
+      }
+    },
+    [auditId, identity, persistFlowCheckpoint]
+  );
 
   const activeJourneyStep = (() => {
     if (['WELCOME', 'PHONE_OTP', 'ASK_NAME', 'ASK_COLLEGE', 'ASK_DEPARTMENT', 'ASK_YEAR'].includes(currentStep)) return 0;
@@ -217,84 +251,122 @@ function MainApp() {
 
   // Resume / Restore Session on Page Refresh
   useEffect(() => {
+    const requestGeneration = flowGenerationRef.current;
     const searchParams = new URLSearchParams(window.location.search);
-    const storedAuditId = searchParams.get('auditId') || localStorage.getItem('careervoice_active_audit_id');
-    const storedStudentId = localStorage.getItem('careervoice_student_id');
-    const storedPhone = localStorage.getItem('careervoice_phone') || '';
+    const urlAuditId = searchParams.get('auditId');
+    const checkpoint = resolveInitialCheckpoint({
+      checkpoint: readCareerVoiceCheckpoint(localStorage),
+      storedStudentId: localStorage.getItem(STUDENT_ID_KEY),
+      storedPhone: localStorage.getItem(PHONE_KEY) || '',
+      storedAuditId: localStorage.getItem(ACTIVE_AUDIT_ID_KEY),
+      urlAuditId,
+      guestSessionId: guestSessionId.current,
+    });
 
-    if (storedAuditId && storedStudentId) {
-      setIsRestoring(true);
-      setIdentity({
-        studentId: storedStudentId,
-        phone: storedPhone,
-        countryCode: '+91',
-        isOtpVerified: true,
-        anonymousId: guestSessionId.current,
-        sessionId: guestSessionId.current,
-      });
-      setAuditId(storedAuditId);
+    logCareerVoiceEvent('flow_restore_started', {
+      studentId: checkpoint.identity?.studentId,
+      auditId: checkpoint.activeAuditId,
+      checkpoint: checkpoint.onboardingCheckpoint,
+      flowGeneration: requestGeneration,
+    });
 
-      getAuditSession(storedAuditId)
-        .then(async (session) => {
-          if (session.targetRole) {
-            setTargetRole({
-              id: session.targetRole.id,
-              title: session.targetRole.title,
-              category: session.targetRole.category || '',
-              description: session.targetRole.description || '',
-              demandLevel: (session.targetRole.demandLevel as any) || 'High',
-              keySkills: session.targetRole.keySkills || [],
-            });
-          }
-
-          if (session.status === 'completed' || session.status === 'finalized') {
-            const report = await getAuditReport(storedAuditId);
-            setAuditResult({
-              auditId: report.auditId || storedAuditId,
-              targetRoleId: report.targetRoleId || session.targetRoleId || 'default_role',
-              targetRole: report.targetRole || session.targetRole?.title || 'Career Specialist',
-              overallScore: report.overallScore,
-              readinessStatus: report.readinessStatus,
-              hiringBenchmark: report.hiringBenchmark,
-              distanceFromBenchmark: report.distanceFromBenchmark,
-              dimensionScores: report.dimensionScores,
-              diagnosisSummary: report.diagnosisSummary,
-              whyRoleFits: report.whyRoleFits,
-              strengths: report.strengths,
-              gaps: (report.gaps || []).map((g) => toCareerGap(g as unknown as ApiGap)),
-              evidenceLedger: report.evidenceLedger,
-              priorityRecommendations: report.priorityRecommendations,
-              diagnosticConclusions: report.diagnosticConclusions,
-              roadmap: [],
-              recommendedPathwissePlan: {
-                planName: 'Pathwisse Pro',
-                highlight: 'Resolve verified gaps with industry mentors.',
-                features: ['1-on-1 Code Reviews', 'Placement Drives'],
-              },
-            });
-            setCurrentStep('READINESS_REPORT');
-          } else {
-            if (session.messages && session.messages.length > 0) {
-              setRestoredMessages(
-                session.messages.map((m) => ({
-                  id: m.id,
-                  sender: m.sender as 'qalam' | 'user',
-                  text: m.text,
-                  timestamp: m.timestamp,
-                }))
-              );
-            }
-            setCurrentStep('CAREER_READINESS_AUDIT');
-          }
-        })
-        .catch((err) => {
-          console.warn('Session restore error:', err);
-          localStorage.removeItem('careervoice_active_audit_id');
-        })
-        .finally(() => {
-          setIsRestoring(false);
-        });
+    if (checkpoint.identity) {
+      setIdentity(checkpoint.identity);
+      logCareerVoiceEvent('flow_restore_identity_found', { studentId: checkpoint.identity.studentId });
     }
+
+    const completeRestore = (step: AuditStep, restoredAuditId: string | null = checkpoint.activeAuditId) => {
+      setAuditId(restoredAuditId);
+      setIsRestoring(false);
+      transitionToStep(step, 'restore_completed', {
+        nextIdentity: checkpoint.identity,
+        nextAuditId: restoredAuditId,
+      });
+      logCareerVoiceEvent('flow_restore_completed', { checkpoint: step, auditId: restoredAuditId });
+    };
+
+    if (!checkpoint.authenticated || !checkpoint.identity) {
+      completeRestore('WELCOME', null);
+      return;
+    }
+
+    logCareerVoiceEvent('flow_restore_checkpoint_found', { checkpoint: checkpoint.onboardingCheckpoint });
+
+    if (!checkpoint.activeAuditId) {
+      completeRestore(checkpoint.onboardingCheckpoint, null);
+      return;
+    }
+
+    setAuditId(checkpoint.activeAuditId);
+    getAuditSession(checkpoint.activeAuditId)
+      .then(async (session) => {
+        if (flowGenerationRef.current !== requestGeneration) {
+          logCareerVoiceEvent('flow_restore_stale_discarded', { requestGeneration, currentGeneration: flowGenerationRef.current });
+          return;
+        }
+
+        if (session.targetRole) {
+          setTargetRole({
+            id: session.targetRole.id,
+            title: session.targetRole.title,
+            category: session.targetRole.category || '',
+            description: session.targetRole.description || '',
+            demandLevel: (session.targetRole.demandLevel as any) || 'High',
+            keySkills: session.targetRole.keySkills || [],
+          });
+        }
+
+        if (session.status === 'completed' || session.status === 'finalized') {
+          const report = await getAuditReport(checkpoint.activeAuditId!);
+          if (flowGenerationRef.current !== requestGeneration) return;
+          setAuditResult({
+            auditId: report.auditId || checkpoint.activeAuditId!,
+            targetRoleId: report.targetRoleId || session.targetRoleId || 'default_role',
+            targetRole: report.targetRole || session.targetRole?.title || 'Career Specialist',
+            overallScore: report.overallScore,
+            readinessStatus: report.readinessStatus,
+            hiringBenchmark: report.hiringBenchmark,
+            distanceFromBenchmark: report.distanceFromBenchmark,
+            dimensionScores: report.dimensionScores,
+            diagnosisSummary: report.diagnosisSummary,
+            whyRoleFits: report.whyRoleFits,
+            strengths: report.strengths,
+            gaps: (report.gaps || []).map((g) => toCareerGap(g as unknown as ApiGap)),
+            evidenceLedger: report.evidenceLedger,
+            priorityRecommendations: report.priorityRecommendations,
+            diagnosticConclusions: report.diagnosticConclusions,
+            roadmap: [],
+            recommendedPathwissePlan: {
+              planName: 'Pathwisse Pro',
+              highlight: 'Resolve verified gaps with industry mentors.',
+              features: ['1-on-1 Code Reviews', 'Placement Drives'],
+            },
+          });
+          completeRestore('READINESS_REPORT', checkpoint.activeAuditId);
+        } else {
+          if (session.messages && session.messages.length > 0) {
+            setRestoredMessages(
+              session.messages.map((m) => ({
+                id: m.id,
+                sender: m.sender as 'qalam' | 'user',
+                text: m.text,
+                timestamp: m.timestamp,
+              }))
+            );
+          }
+          completeRestore('CAREER_READINESS_AUDIT', checkpoint.activeAuditId);
+        }
+      })
+      .catch((err) => {
+        console.warn('Session restore error:', err);
+        const nextUrl = clearCareerVoiceAuditId(localStorage, window.location.href);
+        if (nextUrl) window.history.replaceState({}, '', nextUrl);
+        logCareerVoiceEvent('flow_restore_audit_missing', {
+          auditId: checkpoint.activeAuditId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        completeRestore(checkpoint.onboardingCheckpoint, null);
+      });
   }, []);
 
   const handleSaveProfile = async (careerIntent: string, targetRoleId?: string) => {
@@ -333,16 +405,16 @@ function MainApp() {
       });
 
       setAuditId(session.auditId);
-      localStorage.setItem('careervoice_active_audit_id', session.auditId);
-      localStorage.setItem('careervoice_student_id', identity.studentId);
-      if (identity.phone) localStorage.setItem('careervoice_phone', identity.phone);
+      localStorage.setItem(ACTIVE_AUDIT_ID_KEY, session.auditId);
+      localStorage.setItem(STUDENT_ID_KEY, identity.studentId);
+      if (identity.phone) localStorage.setItem(PHONE_KEY, identity.phone);
 
       const url = new URL(window.location.href);
       url.searchParams.set('auditId', session.auditId);
       window.history.replaceState({}, '', url.toString());
 
       await handleSaveProfile(userRawIntent, confirmedRole.id);
-      setCurrentStep('CAREER_READINESS_AUDIT');
+      transitionToStep('CAREER_READINESS_AUDIT', 'audit_session_created', { nextAuditId: session.auditId });
     } catch (error) {
       setFlowError(error instanceof Error ? error.message : 'Audit session could not be created.');
     }
@@ -390,7 +462,7 @@ function MainApp() {
       return;
     }
 
-    setCurrentStep('PROCESSING');
+    transitionToStep('PROCESSING', 'audit_evaluation_started');
     setIsEvaluating(true);
     setEvaluationError(null);
 
@@ -423,7 +495,7 @@ function MainApp() {
       };
 
       setAuditResult(fullResult);
-      setCurrentStep('READINESS_REPORT');
+      transitionToStep('READINESS_REPORT', 'audit_evaluation_completed');
       trackEvent('career_audit_completed', {
         auditId,
         score: fullResult.overallScore,
@@ -439,12 +511,15 @@ function MainApp() {
   };
 
   const handleRestartAudit = () => {
-    localStorage.removeItem('careervoice_active_audit_id');
+    localStorage.removeItem(ACTIVE_AUDIT_ID_KEY);
+    localStorage.removeItem(FLOW_CHECKPOINT_KEY);
+    localStorage.removeItem(STUDENT_ID_KEY);
+    localStorage.removeItem(PHONE_KEY);
     const url = new URL(window.location.href);
     url.searchParams.delete('auditId');
     window.history.replaceState({}, '', url.toString());
 
-    setCurrentStep('WELCOME');
+    transitionToStep('WELCOME', 'explicit_restart', { nextIdentity: null, nextAuditId: null, persist: false });
     setIdentity(null);
     setAuditId(null);
     setFirstName('');
@@ -485,7 +560,7 @@ function MainApp() {
     >
           {currentStep === 'WELCOME' && (
             <LandingView
-              onStart={() => setCurrentStep('PHONE_OTP')}
+              onStart={() => transitionToStep('PHONE_OTP', 'welcome_start')}
               trackEvent={trackEvent}
             />
           )}
@@ -494,9 +569,10 @@ function MainApp() {
             <PhoneOtpStep
               onVerified={(ident) => {
                 setIdentity(ident);
-                localStorage.setItem('careervoice_student_id', ident.studentId);
-                localStorage.setItem('careervoice_phone', ident.phone);
-                setCurrentStep('ASK_NAME');
+                localStorage.setItem(STUDENT_ID_KEY, ident.studentId);
+                localStorage.setItem(PHONE_KEY, ident.phone);
+                logCareerVoiceEvent('otp_identity_persisted', { studentId: ident.studentId, phone: ident.phone });
+                transitionToStep('ASK_NAME', 'otp_next_step_committed', { nextIdentity: ident, nextAuditId: auditId });
               }}
               trackEvent={trackEvent}
             />
@@ -506,7 +582,7 @@ function MainApp() {
             <AskNameStep
               onComplete={(fName) => {
                 setFirstName(fName);
-                setCurrentStep('ASK_COLLEGE');
+                transitionToStep('ASK_COLLEGE', 'name_completed');
               }}
               trackEvent={trackEvent}
             />
@@ -518,7 +594,7 @@ function MainApp() {
               onComplete={(cName, cId) => {
                 setCollegeName(cName);
                 setCollegeId(cId);
-                setCurrentStep('ASK_DEPARTMENT');
+                transitionToStep('ASK_DEPARTMENT', 'college_completed');
               }}
               trackEvent={trackEvent}
             />
@@ -530,7 +606,7 @@ function MainApp() {
               onComplete={(streamId, dName) => {
                 setCareerStreamId(streamId);
                 setDepartmentName(dName);
-                setCurrentStep('ASK_YEAR');
+                transitionToStep('ASK_YEAR', 'department_completed');
               }}
               trackEvent={trackEvent}
             />
@@ -541,7 +617,7 @@ function MainApp() {
               firstName={firstName}
               onComplete={(aYear) => {
                 setAcademicYear(aYear);
-                setCurrentStep('CAREER_DISCOVERY');
+                transitionToStep('CAREER_DISCOVERY', 'year_completed');
               }}
               trackEvent={trackEvent}
             />
@@ -559,7 +635,7 @@ function MainApp() {
                 setUserRawIntent(intentData.userRawIntent);
                 setKnownSkills(intentData.knownSkills || []);
                 setDiscoveryProfile(intentData.discoveryProfile || {});
-                setCurrentStep('ROLE_DISCOVERY');
+                transitionToStep('ROLE_DISCOVERY', 'career_discovery_completed');
               }}
               trackEvent={trackEvent}
             />
@@ -577,7 +653,7 @@ function MainApp() {
               discoveryProfile={discoveryProfile}
               onSelectRoleForExplanation={(role) => {
                 setSelectedRoleForExploration(role);
-                setCurrentStep('ROLE_EXPLANATION');
+                transitionToStep('ROLE_EXPLANATION', 'role_selected_for_explanation');
               }}
               trackEvent={trackEvent}
             />
@@ -598,9 +674,9 @@ function MainApp() {
                   keySkills: confirmedRole.keySkills,
                 };
                 setTargetRole(target);
-                setCurrentStep('LOAD_COMPETENCY_MODEL');
+                transitionToStep('LOAD_COMPETENCY_MODEL', 'target_role_confirmed');
               }}
-              onExploreAnotherRole={() => setCurrentStep('ROLE_DISCOVERY')}
+              onExploreAnotherRole={() => transitionToStep('ROLE_DISCOVERY', 'explore_another_role')}
               onSelectDifferentRole={(newRole) => setSelectedRoleForExploration(newRole)}
               trackEvent={trackEvent}
             />
@@ -632,7 +708,7 @@ function MainApp() {
               firstName={firstName}
               initialMessages={restoredMessages}
               onInterviewFinished={(_data) => {
-                setCurrentStep('EVIDENCE_UPLOAD');
+                transitionToStep('EVIDENCE_UPLOAD', 'interview_finished');
               }}
               onToolCalls={handleToolCalls}
               trackEvent={trackEvent}
@@ -652,7 +728,7 @@ function MainApp() {
           {currentStep === 'PROCESSING' && (
             <ProcessingSequenceStep
               onFinished={() => {
-                if (auditResult) setCurrentStep('READINESS_REPORT');
+                if (auditResult) transitionToStep('READINESS_REPORT', 'processing_finished');
               }}
               trackEvent={trackEvent}
               error={evaluationError}
@@ -665,7 +741,7 @@ function MainApp() {
             <ReadinessReportView
               result={auditResult}
               role={targetRole}
-              onNext={() => setCurrentStep('GAP_REPORT')}
+              onNext={() => transitionToStep('GAP_REPORT', 'readiness_report_next')}
               trackEvent={trackEvent}
             />
           )}
@@ -674,7 +750,7 @@ function MainApp() {
             <GapReportView
               gaps={auditResult.gaps}
               role={targetRole}
-              onNext={() => setCurrentStep('ROADMAP')}
+              onNext={() => transitionToStep('ROADMAP', 'gap_report_next')}
               trackEvent={trackEvent}
             />
           )}

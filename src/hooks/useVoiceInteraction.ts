@@ -1,14 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createSpeechPlaybackController, type SpeechPlaybackController } from './voicePlaybackController';
 
 export interface UseVoiceInteractionProps {
   onSpeechResult?: (text: string) => void;
   onBargeIn?: () => void;
-}
-
-interface VoiceSpeakResponse {
-  success: boolean;
-  audioBase64: string;
-  contentType: string;
 }
 
 interface VoiceTranscribeResponse {
@@ -49,13 +44,6 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-function base64ToBlob(base64: string, contentType: string): Blob {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: contentType });
-}
-
 export function useVoiceInteraction({
   onSpeechResult,
   onBargeIn,
@@ -76,9 +64,8 @@ export function useVoiceInteraction({
   const animationFrameRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeAudioUrlRef = useRef<string | null>(null);
   const isSpeakingRef = useRef<boolean>(false);
+  const speechControllerRef = useRef<SpeechPlaybackController | null>(null);
 
   useEffect(() => {
     isSpeakingRef.current = isSpeaking;
@@ -269,100 +256,33 @@ export function useVoiceInteraction({
     stopAmplitudeLoop();
   };
 
-  const speakWithBrowserFallback = useCallback((text: string, onEnd?: () => void) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !window.speechSynthesis) {
-      onEnd?.();
-      return;
-    }
+  useEffect(() => {
+    speechControllerRef.current = createSpeechPlaybackController({
+      onSpeakingChange: (speaking) => {
+        setIsSpeaking(speaking);
+        isSpeakingRef.current = speaking;
+      },
+    });
 
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    utterance.pitch = 1.05;
-    utterance.voice =
-      voicesRef.current.find((voice) => voice.lang?.startsWith('en') && /Natural|Google|Samantha|Daniel|Karen/i.test(voice.name)) ||
-      voicesRef.current.find((voice) => voice.lang?.startsWith('en')) ||
-      null;
-
-    const finish = () => {
-      setIsSpeaking(false);
-      isSpeakingRef.current = false;
-      utteranceRef.current = null;
-      onEnd?.();
+    return () => {
+      speechControllerRef.current?.stop('unmount');
+      speechControllerRef.current = null;
     };
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      isSpeakingRef.current = true;
-    };
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    utteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
-    window.speechSynthesis.resume();
   }, []);
 
-  const speakText = useCallback(async (text: string, onEnd?: () => void) => {
-    try {
-      if (!text.trim()) {
-        onEnd?.();
-        return;
-      }
-      const response = await fetch('/api/voice/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, format: 'mp3', voice: 'alloy' }),
+  // Speak Text using the shared Qalam playback authority.
+  const speakText = useCallback(
+    (text: string, onEnd?: () => void) => {
+      speechControllerRef.current?.speak(text, onEnd, {
+        source: 'qalam',
+        ttsEndpoint: '/api/voice/speak',
       });
-      const data = await response.json().catch(() => ({})) as Partial<VoiceSpeakResponse>;
-      if (!response.ok || !data.success || !data.audioBase64 || !data.contentType) {
-        throw new Error('OpenRouter TTS failed.');
-      }
-
-      const blob = base64ToBlob(data.audioBase64, data.contentType);
-      const url = URL.createObjectURL(blob);
-      activeAudioUrlRef.current = url;
-      const audio = new Audio(url);
-      activeAudioRef.current = audio;
-
-      const finish = () => {
-        setIsSpeaking(false);
-        isSpeakingRef.current = false;
-        activeAudioRef.current = null;
-        if (activeAudioUrlRef.current) {
-          URL.revokeObjectURL(activeAudioUrlRef.current);
-          activeAudioUrlRef.current = null;
-        }
-        onEnd?.();
-      };
-
-      audio.onplay = () => {
-        setIsSpeaking(true);
-        isSpeakingRef.current = true;
-      };
-      audio.onended = finish;
-      audio.onerror = finish;
-      await audio.play();
-    } catch (err) {
-      console.warn('OpenRouter TTS failed; using browser speech fallback:', err);
-      speakWithBrowserFallback(text, onEnd);
-    }
-  }, [speakWithBrowserFallback]);
+    },
+    []
+  );
 
   const stopSpeaking = useCallback(() => {
-    try {
-      activeAudioRef.current?.pause();
-      activeAudioRef.current = null;
-      if (activeAudioUrlRef.current) {
-        URL.revokeObjectURL(activeAudioUrlRef.current);
-        activeAudioUrlRef.current = null;
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-    } catch {
-      // Ignore teardown errors.
-    }
-    setIsSpeaking(false);
-    isSpeakingRef.current = false;
+    speechControllerRef.current?.stop('stopSpeaking');
     utteranceRef.current = null;
   }, []);
 

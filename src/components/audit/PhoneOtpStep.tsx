@@ -3,6 +3,7 @@ import { QalamCharacter } from '../qalam/QalamCharacter';
 import { UserIdentity } from '../../types';
 import { Phone, ShieldCheck, ArrowRight, AlertCircle, RefreshCw, ChevronDown, Loader2 } from 'lucide-react';
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
+import { logCareerVoiceEvent } from '../../domain/careerVoiceFlow';
 
 interface PhoneOtpStepProps {
   onVerified: (identity: UserIdentity) => void;
@@ -28,6 +29,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const digitRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const otpRequestGenerationRef = useRef(0);
   const { isSpeaking, amplitude, speakText, stopSpeaking } = useVoiceInteraction({});
 
   const fullPhone = `${selectedCountry.code}${phone.trim().replace(/\D/g, '')}`;
@@ -51,6 +53,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
     const cleanPhone = phone.trim().replace(/\D/g, '');
     if (cleanPhone.length < 8) throw new Error('Please enter a valid mobile number.');
 
+    logCareerVoiceEvent('otp_request_started', { phone: `${selectedCountry.code}${cleanPhone}` });
     const response = await fetch('/api/auth/otp/request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -58,6 +61,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
     });
     const data = await response.json();
     if (!response.ok || data.success === false) throw new Error(data.message || 'Could not send the verification code.');
+    logCareerVoiceEvent('otp_request_success', { phone: `${selectedCountry.code}${cleanPhone}` });
   };
 
   const handleSendOtp = async (event: React.FormEvent) => {
@@ -72,6 +76,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
       setCountdown(30);
       setOtpDigits(['', '', '', '', '', '']);
     } catch (requestError) {
+      logCareerVoiceEvent('otp_request_failed', { error: requestError instanceof Error ? requestError.message : String(requestError) });
       setError(requestError instanceof Error ? requestError.message : 'Could not send OTP.');
     } finally {
       setIsSubmitting(false);
@@ -101,7 +106,10 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
 
     setError(null);
     setIsSubmitting(true);
+    otpRequestGenerationRef.current += 1;
+    const requestGeneration = otpRequestGenerationRef.current;
     try {
+      logCareerVoiceEvent('otp_verify_started', { phone: fullPhone, flowGeneration: requestGeneration });
       const response = await fetch('/api/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,8 +119,13 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
       if (!response.ok || data.success === false || !data.studentId) {
         throw new Error(data.message || 'Verification failed. Please retry.');
       }
+      if (requestGeneration !== otpRequestGenerationRef.current) {
+        logCareerVoiceEvent('otp_verify_stale_discarded', { phone: fullPhone, requestGeneration, currentGeneration: otpRequestGenerationRef.current });
+        return;
+      }
 
       trackEvent('otp_verified');
+      logCareerVoiceEvent('otp_verify_success', { phone: data.phone || fullPhone, studentId: data.studentId });
       onVerified({
         phone: data.phone || fullPhone,
         countryCode: selectedCountry.code,
@@ -122,6 +135,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
         sessionId: crypto.randomUUID(),
       });
     } catch (verifyError) {
+      logCareerVoiceEvent('otp_verify_failed', { phone: fullPhone, error: verifyError instanceof Error ? verifyError.message : String(verifyError) });
       setError(verifyError instanceof Error ? verifyError.message : 'Verification failed. Please retry.');
     } finally {
       setIsSubmitting(false);
