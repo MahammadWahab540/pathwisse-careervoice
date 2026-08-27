@@ -1274,7 +1274,7 @@ app.post('/api/auth/otp/request', async (req, res) => {
     const testCode = await getOtpTestCodeForPhone(phone);
     if (testCode) {
       console.log(`[TEST_AUTH] OTP allowlist active for ${phone} with code ${testCode}`);
-      return res.json({ success: true, phone, devMode: true });
+      return res.json({ success: true, phone, devMode: true, mode: 'supabase_allowlist' });
     }
 
     const supabase = getSupabase();
@@ -1313,12 +1313,16 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     if (!/^\d{6}$/.test(token)) return apiError(res, 400, 'INVALID_OTP', 'Enter the 6-digit verification code.');
 
     const testCode = await getOtpTestCodeForPhone(phone);
-    if (testCode && token === testCode) {
+    if (testCode) {
+      if (token !== testCode) {
+        return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'Verification code is expired or invalid.');
+      }
       return res.json({
         success: true,
         studentId: devStudentIdForPhone(phone),
         phone,
         devMode: true,
+        mode: 'supabase_allowlist',
       });
     }
 
