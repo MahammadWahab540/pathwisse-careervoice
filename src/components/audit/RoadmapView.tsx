@@ -48,17 +48,22 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
           <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1f3861] flex items-center justify-center"><Map className="w-4 h-4" /></div>
         </div>
 
-        {/* Custom 6-Week Roadmap in Progress Notice */}
-        <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/70 to-slate-50 p-3.5 space-y-1 shadow-xs">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider">
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
+        {/* Team Connect & Custom 6-Week Roadmap Notice */}
+        <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-indigo-50/70 to-slate-50 p-4 space-y-2 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
+              </span>
+              <span>Team Connect & Custom Path</span>
+            </div>
+            <span className="text-[9px] font-bold bg-[#1f3861] text-white px-2.5 py-0.5 rounded-full shadow-xs">
+              Personalized
             </span>
-            <span>Personalized 6-Week Roadmap in Progress</span>
           </div>
           <p className="text-[11px] leading-relaxed text-slate-700 font-medium">
-            Our team is building your full customized 6-week roadmap. In the meantime, start with the verified priority actions below.
+            Our team is preparing your full customized 6-week milestone roadmap and <strong>will connect with you in your detailed career report</strong>. In the meantime, start with your initial verified actions below.
           </p>
         </div>
 

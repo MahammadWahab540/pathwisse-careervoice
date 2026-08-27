@@ -78,19 +78,24 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
           </div>
         </div>
 
-        {/* Custom 6-Week Roadmap & Comprehensive Report In Progress Banner */}
-        <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/70 to-slate-50 p-4 space-y-1.5 shadow-xs">
-          <div className="flex items-center gap-2">
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
-            </span>
-            <span className="text-[10.5px] font-bold text-[#1f3861] uppercase tracking-wider">
-              Custom Report & 6-Week Roadmap in Progress
+        {/* Team Connect & Custom Career Report Notice Banner */}
+        <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-indigo-50/70 to-slate-50 p-4 space-y-2 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1f3861] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1f3861]"></span>
+              </span>
+              <span className="text-[10.5px] font-bold text-[#1f3861] uppercase tracking-wider">
+                Personalized Career Report in Progress
+              </span>
+            </div>
+            <span className="text-[9px] font-bold bg-[#1f3861] text-white px-2.5 py-0.5 rounded-full shadow-xs">
+              Team Connect
             </span>
           </div>
           <p className="text-xs leading-relaxed text-slate-700 font-medium">
-            Our team is curating your customized in-depth career report and personalized 6-week milestone roadmap based on your demonstrated audit evidence.
+            Our team of career specialists is reviewing your audit signals and <strong>will connect with you directly with your customized in-depth career report</strong> and personalized 6-week roadmap.
           </p>
         </div>
 

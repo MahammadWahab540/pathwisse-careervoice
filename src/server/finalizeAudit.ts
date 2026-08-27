@@ -545,58 +545,50 @@ export async function finalizeCareerAudit(
   });
 
   const evidenceById = new Map(usableEvidence.map((item) => [item.id, item]));
-  const scoreRecords: Array<{
-    competency: CompetencyRecord;
-    classification: ClassificationItem;
-    evidence: EvidenceRow;
-    signalId: string;
-    gapId: string;
-    demonstratedScore: number;
-    gap: ReturnType<typeof calculateSkillGap>;
-  }> = [];
-
-  for (const competency of competencies) {
-    const classified = classification.competencySignals.find((item) => item.skillId === competency.skillId);
-    if (!classified) throw new AuditFinalizationError('AI_RESPONSE_INVALID', `Missing classification for ${competency.skillName}.`, 502);
-    const evidence = evidenceById.get(classified.evidenceId);
-    if (!evidence) throw new AuditFinalizationError('AI_RESPONSE_INVALID', 'Classification referenced missing evidence.', 502);
-    const signalId = await persistFinalClassification(supabase, {
-      auditId,
-      studentId: session.user_id,
-      roleId: session.target_role_id,
-      competency,
-      classification: classified,
-      evidence,
-    });
-    const scoringSignal: ScoringSignal = {
-      id: signalId,
-      skillName: competency.skillName,
-      extractedLevel: classified.extractedLevel,
-      confidenceScore: classified.confidenceScore,
-      evidenceStrength: classified.evidenceStrength,
-      evidenceId: classified.evidenceId,
-    };
-    const demonstratedScore = scoreSignal(scoringSignal);
-    const persisted = await upsertScoreAndGap(supabase, {
-      auditId,
-      studentId: session.user_id,
-      roleId: session.target_role_id,
-      competency,
-      signalId,
-      evidenceId: classified.evidenceId,
-      confidenceScore: classified.confidenceScore,
-      demonstratedScore,
-    });
-    scoreRecords.push({
-      competency,
-      classification: classified,
-      evidence,
-      signalId,
-      gapId: persisted.gapId,
-      demonstratedScore,
-      gap: persisted.gap,
-    });
-  }
+  const scoreRecords = await Promise.all(
+    competencies.map(async (competency) => {
+      const classified = classification.competencySignals.find((item) => item.skillId === competency.skillId);
+      if (!classified) throw new AuditFinalizationError('AI_RESPONSE_INVALID', `Missing classification for ${competency.skillName}.`, 502);
+      const evidence = evidenceById.get(classified.evidenceId);
+      if (!evidence) throw new AuditFinalizationError('AI_RESPONSE_INVALID', 'Classification referenced missing evidence.', 502);
+      const signalId = await persistFinalClassification(supabase, {
+        auditId,
+        studentId: session.user_id,
+        roleId: session.target_role_id,
+        competency,
+        classification: classified,
+        evidence,
+      });
+      const scoringSignal: ScoringSignal = {
+        id: signalId,
+        skillName: competency.skillName,
+        extractedLevel: classified.extractedLevel,
+        confidenceScore: classified.confidenceScore,
+        evidenceStrength: classified.evidenceStrength,
+        evidenceId: classified.evidenceId,
+      };
+      const demonstratedScore = scoreSignal(scoringSignal);
+      const persisted = await upsertScoreAndGap(supabase, {
+        auditId,
+        studentId: session.user_id,
+        roleId: session.target_role_id,
+        competency,
+        signalId,
+        evidenceId: classified.evidenceId,
+        confidenceScore: classified.confidenceScore,
+        demonstratedScore,
+      });
+      return {
+        competency,
+        classification: classified,
+        evidence,
+        signalId,
+        gapId: persisted.gapId,
+        demonstratedScore,
+        gap: persisted.gap,
+      };
+    })
+  );
 
   const demonstratedBySkill = new Map(scoreRecords.map((record) => [record.competency.skillId, record.demonstratedScore]));
   const dimensionByName = new Map(classification.dimensionSignals.map((item) => [item.dimension, dimensionScore(item)]));

@@ -40,25 +40,19 @@ export const ProcessingSequenceStep: React.FC<ProcessingSequenceStepProps> = ({
           return prev + 1;
         } else {
           clearInterval(interval);
-          if (!error && !isEvaluating) {
-            setTimeout(() => {
-              onFinished();
-            }, 800);
-          }
           return prev;
         }
       });
-    }, 900);
+    }, 250);
 
     return () => clearInterval(interval);
-  }, [error, isEvaluating]);
+  }, [error]);
 
-  // When evaluation completes without error and animations done, trigger onFinished
   useEffect(() => {
     if (!error && !isEvaluating && completedIndex >= STEPS.length - 1) {
       const timer = setTimeout(() => {
         onFinished();
-      }, 500);
+      }, 200);
       return () => clearTimeout(timer);
     }
   }, [error, isEvaluating, completedIndex, onFinished]);
@@ -71,7 +65,7 @@ export const ProcessingSequenceStep: React.FC<ProcessingSequenceStepProps> = ({
         subtitles={
           error
             ? 'I encountered an issue computing verified scores from the evaluation engine.'
-            : "Give me just a moment. I'm connecting your career signals with live benchmarks..."
+            : "Give me just a moment. I'm connecting your career signals with our diagnostic benchmarks..."
         }
       />
 
