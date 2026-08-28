@@ -42,6 +42,7 @@ import { createAuditSession, getAuditSession, uploadTextEvidence, finalizeAudit 
 import { getAuditReport } from './api/reports';
 import { getRoadmapHandoff } from './api/roadmap';
 import { trackAnalyticsEvent } from './api/analytics';
+import { getBrowserSupabase } from './lib/supabaseBrowser';
 import {
   ACTIVE_AUDIT_ID_KEY,
   AUTH_ACCESS_TOKEN_KEY,
@@ -271,6 +272,25 @@ function MainApp() {
       flowGeneration: requestGeneration,
     });
 
+    const supabase = getBrowserSupabase();
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.access_token) {
+        localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, data.session.access_token);
+        if (data.session.user?.id) {
+          setIdentity((prev) => prev ? { ...prev, accessToken: data.session?.access_token } : prev);
+        }
+      }
+    });
+
+    const { data: authSubscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        localStorage.setItem(AUTH_ACCESS_TOKEN_KEY, session.access_token);
+        setIdentity((prev) => (prev ? { ...prev, accessToken: session.access_token } : prev));
+      } else {
+        localStorage.removeItem(AUTH_ACCESS_TOKEN_KEY);
+      }
+    });
+
     if (checkpoint.identity) {
       setIdentity(checkpoint.identity);
       logCareerVoiceEvent('flow_restore_identity_found', { studentId: checkpoint.identity.studentId });
@@ -288,14 +308,14 @@ function MainApp() {
 
     if (!checkpoint.authenticated || !checkpoint.identity) {
       completeRestore('WELCOME', null);
-      return;
+      return () => authSubscription?.subscription.unsubscribe();
     }
 
     logCareerVoiceEvent('flow_restore_checkpoint_found', { checkpoint: checkpoint.onboardingCheckpoint });
 
     if (!checkpoint.activeAuditId) {
       completeRestore(checkpoint.onboardingCheckpoint, null);
-      return;
+      return () => authSubscription?.subscription.unsubscribe();
     }
 
     setAuditId(checkpoint.activeAuditId);

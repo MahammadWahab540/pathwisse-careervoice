@@ -10,6 +10,7 @@ export interface ServerConfig {
   geminiApiKey?: string;
   openrouterApiKey?: string;
   supabaseUrl?: string;
+  supabaseAnonKey?: string;
   supabaseServiceRoleKey?: string;
   pipecatServiceUrl?: string;
   pipecatServiceToken?: string;
@@ -67,7 +68,8 @@ function clean(value: string | undefined): string | undefined {
 export function buildServerConfig(env: ServerEnvironment = process.env): ServerConfig {
   const geminiApiKey = clean(env.GEMINI_API_KEY);
   const openrouterApiKey = clean(env.OPENROUTER_API_KEY);
-  const supabaseUrl = clean(env.SUPABASE_URL);
+  const supabaseUrl = clean(env.SUPABASE_URL) || clean(env.VITE_SUPABASE_URL);
+  const supabaseAnonKey = clean(env.SUPABASE_ANON_KEY) || clean(env.VITE_SUPABASE_ANON_KEY) || clean(env.VITE_SUPABASE_PUBLISHABLE_KEY);
   const supabaseServiceRoleKey = clean(env.SUPABASE_SERVICE_ROLE_KEY);
   const pipecatServiceUrl = clean(env.PIPECAT_SERVICE_URL) || 'https://7pmmmiwq7m.ap-south-1.awsapprunner.com';
   const pipecatServiceToken = clean(env.PIPECAT_SERVICE_TOKEN) || clean(env.CAREERVOICE_SERVICE_TOKEN);
@@ -103,6 +105,7 @@ export function buildServerConfig(env: ServerEnvironment = process.env): ServerC
     geminiApiKey,
     openrouterApiKey,
     supabaseUrl,
+    supabaseAnonKey,
     supabaseServiceRoleKey,
     pipecatServiceUrl,
     pipecatServiceToken,

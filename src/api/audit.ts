@@ -1,4 +1,4 @@
-﻿import { api } from './client';
+import { api, authenticatedFetch, ApiClientError } from './client';
 import type {
   AuditSessionDto,
   QalamChatResponseDto,
@@ -74,7 +74,19 @@ export async function submitSkillSignal(input: SubmitSkillSignalInput): Promise<
   signalId: string | null;
   evidenceId: string;
 }> {
-  return api.post('/api/audit/evidence/signal', input);
+  const response = await authenticatedFetch('/api/audit/evidence/signal', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const message = data?.message || data?.error || response.statusText || 'Failed to submit skill signal';
+    const code = data?.code || (response.status === 401 ? 'UNAUTHORIZED' : 'REQUEST_FAILED');
+    throw new ApiClientError(message, response.status, code, data?.details);
+  }
+
+  return data;
 }
 
 export async function uploadTextEvidence(input: UploadTextEvidenceInput): Promise<{

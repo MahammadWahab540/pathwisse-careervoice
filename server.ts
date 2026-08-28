@@ -6,6 +6,7 @@ import crypto, { createHash, randomInt, randomUUID } from 'crypto';
 import { Modality, Type, type LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabase, requireSupabase } from './src/lib/supabase';
 import {
   calculateRoleFit,
@@ -205,7 +206,7 @@ async function sendSupabaseWhatsappOtp(phone: string): Promise<{ success: boolea
   return { success: true, message: data?.message };
 }
 
-async function verifySupabaseWhatsappOtp(phone: string, token: string): Promise<{ success: boolean; error?: string }> {
+async function verifySupabaseWhatsappOtp(phone: string, token: string): Promise<{ success: boolean; verified?: boolean; studentId?: string; session?: any; error?: string }> {
   if (!serverConfig.supabaseUrl) throw new Error('SUPABASE_NOT_CONFIGURED');
   const apiKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || serverConfig.supabaseServiceRoleKey || '';
   const url = `${serverConfig.supabaseUrl}/functions/v1/verify-whatsapp-otp`;
@@ -222,7 +223,12 @@ async function verifySupabaseWhatsappOtp(phone: string, token: string): Promise<
   if (!response.ok || data?.error) {
     return { success: false, error: typeof data?.error === 'string' ? data.error : data?.error?.message || 'OTP verification failed' };
   }
-  return { success: true };
+  return {
+    success: true,
+    verified: true,
+    studentId: typeof data?.studentId === 'string' ? data.studentId : undefined,
+    session: data?.session && typeof data.session.access_token === 'string' ? data.session : undefined,
+  };
 }
 
 async function sendMetaWhatsappOtp(phone: string, token: string): Promise<string | null> {
@@ -277,14 +283,26 @@ async function findAuthUserIdByPhone(phone: string): Promise<string | null> {
   const supabase = getSupabase();
   if (!supabase) return null;
   const normalized = normalizePhoneForOtp(phone);
-  const profile = await supabase.from('profiles').select('user_id').eq('phone', normalized).maybeSingle();
-  if (profile.error) throw new PersistenceError('profile_phone_lookup', profile.error.message);
+  const digitsOnly = normalized.replace(/\D/g, '');
+  const variations = [
+    normalized,
+    `+${digitsOnly}`,
+    digitsOnly,
+    digitsOnly.startsWith('91') && digitsOnly.length === 12 ? `+${digitsOnly.slice(2)}` : null,
+    digitsOnly.startsWith('91') && digitsOnly.length === 12 ? digitsOnly.slice(2) : null,
+  ].filter((item): item is string => Boolean(item));
+
+  const profile = await supabase.from('profiles').select('user_id').in('phone', variations).maybeSingle();
+  if (profile.error) console.warn('profile_phone_lookup_notice', profile.error.message);
   if (profile.data?.user_id) return String(profile.data.user_id);
 
   for (let page = 1; page <= 10; page += 1) {
     const result = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
     if (result.error) throw new PersistenceError('auth_user_phone_lookup', result.error.message);
-    const user = result.data.users.find((item) => normalizePhoneForOtp((item as { phone?: string }).phone || '') === normalized);
+    const user = result.data.users.find((item) => {
+      const uPhone = normalizePhoneForOtp((item as { phone?: string }).phone || '').replace(/\D/g, '');
+      return uPhone && (uPhone === digitsOnly || (uPhone.endsWith(digitsOnly.slice(-10)) && digitsOnly.endsWith(uPhone.slice(-10))));
+    });
     if (user) return user.id;
     if (result.data.users.length < 1000) break;
   }
@@ -339,7 +357,6 @@ async function ensureVerifiedUser(studentId?: string | null, phone?: string | nu
       { onConflict: 'user_id' }
     ).select('user_id').maybeSingle();
     if (profileSync.error) console.warn('verified_profile_upsert_notice', profileSync.error.message);
-
   }
 
   return finalId;
@@ -347,6 +364,101 @@ async function ensureVerifiedUser(studentId?: string | null, phone?: string | nu
 
 async function ensureVerifiedPhoneProfile(phone: string): Promise<string> {
   return ensureVerifiedUser(null, phone);
+}
+
+interface AuthSessionTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number;
+  expires_in?: number;
+  token_type?: string;
+  user: {
+    id: string;
+    phone?: string;
+    email?: string;
+    [key: string]: unknown;
+  };
+}
+
+async function createSessionForUser(userId: string, email?: string): Promise<AuthSessionTokens | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  const anonKey = serverConfig.supabaseAnonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!anonKey || !serverConfig.supabaseUrl) {
+    console.warn('[AUTH] Cannot create session: Supabase URL or Anon key missing');
+    return null;
+  }
+
+  const userRes = await supabase.auth.admin.getUserById(userId);
+  if (!userRes.data?.user) {
+    console.warn(`[AUTH] User ${userId} not found in Supabase Auth`);
+    return null;
+  }
+
+  let targetEmail = email || userRes.data.user.email;
+  if (!targetEmail) {
+    targetEmail = `${userId}@careervoice.internal`;
+    const updateRes = await supabase.auth.admin.updateUserById(userId, {
+      email: targetEmail,
+      email_confirm: true,
+    });
+    if (updateRes.error) {
+      console.warn('[AUTH] Notice setting email on canonical user:', updateRes.error.message);
+    }
+  }
+
+  const linkRes = await supabase.auth.admin.generateLink({
+    type: 'magiclink',
+    email: targetEmail,
+  });
+
+  if (linkRes.error || !linkRes.data?.properties?.hashed_token) {
+    console.warn('[AUTH] generateLink error:', linkRes.error?.message);
+    return null;
+  }
+
+  if (linkRes.data.user?.id && linkRes.data.user.id !== userId) {
+    console.error(`[AUTH] Generated link user ID ${linkRes.data.user.id} does not match canonical user ID ${userId}`);
+    return null;
+  }
+
+  const anonClient = createClient(serverConfig.supabaseUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const sessionRes = await anonClient.auth.verifyOtp({
+    token_hash: linkRes.data.properties.hashed_token,
+    type: 'magiclink',
+  });
+
+  if (sessionRes.error || !sessionRes.data?.session) {
+    console.warn('[AUTH] exchange magiclink error:', sessionRes.error?.message);
+    return null;
+  }
+
+  if (sessionRes.data.session.user.id !== userId) {
+    console.error(`[AUTH] Session user ID ${sessionRes.data.session.user.id} does not match canonical user ID ${userId}`);
+    return null;
+  }
+
+  const session = sessionRes.data.session;
+  console.log(`[AUTH] Supabase session established`);
+  console.log(`[AUTH] session user id = ${userId}`);
+  console.log(`[AUTH] access token present = true`);
+
+  return {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at,
+    expires_in: session.expires_in,
+    token_type: session.token_type,
+    user: {
+      id: session.user.id,
+      phone: session.user.phone,
+      email: session.user.email,
+    },
+  };
 }
 
 function apiError(
@@ -373,16 +485,53 @@ function accessTokenFromRequest(req: express.Request): string {
   return match[1].trim();
 }
 
+function verifyServiceToken(providedHeader: string | undefined, expectedToken: string | undefined): boolean {
+  if (!expectedToken) return true; // development mode if unconfigured
+  if (!providedHeader || !providedHeader.startsWith('Bearer ')) return false;
+  const provided = providedHeader.slice(7).trim();
+  if (!provided) return false;
+  const h1 = crypto.createHash('sha256').update(expectedToken).digest();
+  const h2 = crypto.createHash('sha256').update(provided).digest();
+  return crypto.timingSafeEqual(h1, h2);
+}
+
 async function requireAuthenticatedUser(req: express.Request) {
-  const supabase = requireSupabase();
+  const hasAuthHeader = Boolean(req.header('authorization'));
+  if (!hasAuthHeader) {
+    console.log('[AUTH] authorization header present = false');
+    throw new AuthSessionError(401, 'AUTH_REQUIRED', 'Supabase session is required.');
+  }
+
   const accessToken = accessTokenFromRequest(req);
+  console.log('[AUTH] authorization header present = true');
+
+  const supabase = requireSupabase();
   const result = await supabase.auth.getUser(accessToken);
-  if (result.error) {
-    console.warn('auth_invalid', { message: result.error.message });
+  if (result.error || !result.data?.user) {
+    console.warn('[AUTH] token validation error', { message: result.error?.message });
     throw new AuthSessionError(401, 'INVALID_SESSION', 'Supabase session is invalid or expired.');
   }
-  if (!result.data.user) throw new AuthSessionError(401, 'INVALID_SESSION', 'Supabase session is invalid or expired.');
+
+  console.log(`[AUTH] Supabase user validated = ${result.data.user.id}`);
+  (req as any).authUser = result.data.user;
   return { supabase, user: result.data.user };
+}
+
+async function authenticateRequest(req: express.Request): Promise<{
+  supabase: SupabaseClient;
+  user: { id: string; phone?: string | null; email?: string | null } | null;
+  isService: boolean;
+}> {
+  const authorization = req.header('authorization');
+  const serviceToken = serverConfig.careervoiceServiceToken || serverConfig.pipecatServiceToken || process.env.CAREERVOICE_SERVICE_TOKEN;
+
+  if (authorization && serviceToken && verifyServiceToken(authorization, serviceToken)) {
+    const supabase = requireSupabase();
+    return { supabase, user: null, isService: true };
+  }
+
+  const { supabase, user } = await requireAuthenticatedUser(req);
+  return { supabase, user, isService: false };
 }
 
 async function ensureCanonicalProfile(input: {
@@ -1483,6 +1632,13 @@ app.post('/api/auth/otp/request', async (req, res) => {
   }
 });
 
+app.get('/api/auth/config', (_req, res) => {
+  return res.json({
+    supabaseUrl: serverConfig.supabaseUrl || null,
+    supabaseAnonKey: serverConfig.supabaseAnonKey || null,
+  });
+});
+
 app.post('/api/auth/otp/verify', async (req, res) => {
   try {
     const phone = normalizePhoneForOtp(requiredString(req.body?.phone, 'phone'));
@@ -1498,10 +1654,14 @@ app.post('/api/auth/otp/verify', async (req, res) => {
         console.warn('verified_phone_profile_sync_warning', profileErr);
         studentId = randomUUID();
       }
+      const session = await createSessionForUser(studentId);
+      console.log(`[AUTH] OTP verified for test allowlist user ${studentId}`);
       return res.json({
         success: true,
         studentId,
         phone,
+        session: session || undefined,
+        accessToken: session?.access_token,
         devMode: true,
       });
     }
@@ -1510,14 +1670,27 @@ app.post('/api/auth/otp/verify', async (req, res) => {
       try {
         const edgeRes = await verifySupabaseWhatsappOtp(phone, token);
         if (edgeRes.success) {
-          let studentId: string;
-          try {
-            studentId = await ensureVerifiedPhoneProfile(phone);
-          } catch (profileErr) {
-            console.warn('verified_phone_profile_sync_warning', profileErr);
-            studentId = randomUUID();
+          let studentId = edgeRes.studentId;
+          if (!studentId) {
+            try {
+              studentId = await ensureVerifiedPhoneProfile(phone);
+            } catch (profileErr) {
+              console.warn('verified_phone_profile_sync_warning', profileErr);
+              studentId = randomUUID();
+            }
           }
-          return res.json({ success: true, studentId, phone });
+          const session = (edgeRes.session && typeof edgeRes.session.access_token === 'string')
+            ? edgeRes.session
+            : await createSessionForUser(studentId);
+          console.log(`[AUTH] OTP verified via WhatsApp edge function for user ${studentId}`);
+          return res.json({
+            success: true,
+            verified: true,
+            studentId,
+            phone,
+            session: session || undefined,
+            accessToken: session?.access_token,
+          });
         } else if (edgeRes.error) {
           return apiError(res, 401, 'OTP_VERIFICATION_FAILED', edgeRes.error);
         }
@@ -1535,12 +1708,29 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     if (result.error) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', result.error.message);
     if (!result.data.user) return apiError(res, 401, 'OTP_VERIFICATION_FAILED', 'OTP could not be verified.');
 
+    const session = result.data.session
+      ? {
+          access_token: result.data.session.access_token,
+          refresh_token: result.data.session.refresh_token,
+          expires_at: result.data.session.expires_at,
+          expires_in: result.data.session.expires_in,
+          token_type: result.data.session.token_type,
+          user: {
+            id: result.data.user.id,
+            phone: result.data.user.phone || phone,
+            email: result.data.user.email,
+          },
+        }
+      : await createSessionForUser(result.data.user.id);
+
+    console.log(`[AUTH] OTP verified via Supabase SMS auth for user ${result.data.user.id}`);
     return res.json({
       success: true,
       studentId: result.data.user.id,
       phone: result.data.user.phone || phone,
-      accessToken: result.data.session?.access_token,
-      expiresAt: result.data.session?.expires_at,
+      session: session || undefined,
+      accessToken: session?.access_token,
+      expiresAt: session?.expires_at,
     });
   } catch (error) {
     if (error instanceof Error && /required/.test(error.message)) return apiError(res, 400, 'INVALID_REQUEST', error.message);
@@ -1688,6 +1878,9 @@ app.get('/api/me', async (req, res) => {
 app.post('/api/career-discovery/session', async (req, res) => {
   try {
     const { supabase, user } = await requireAuthenticatedUser(req);
+    if (req.body?.studentId && req.body.studentId !== user.id) {
+      return apiError(res, 403, 'USER_ID_MISMATCH', 'Authenticated user does not match requested student.');
+    }
     const branch = optionalString(req.query.branch);
     const bodyBranch = optionalString(req.body?.branch);
     const academicYear = normalizedAcademicYear(req.body?.academicYear);
@@ -1775,6 +1968,9 @@ app.get('/api/career-discovery', async (req, res) => {
 app.post('/api/career-discovery/answer', async (req, res) => {
   try {
     const { supabase, user } = await requireAuthenticatedUser(req);
+    if (req.body?.studentId && req.body.studentId !== user.id) {
+      return apiError(res, 403, 'USER_ID_MISMATCH', 'Authenticated user does not match requested student.');
+    }
     await ensureCanonicalProfile({
       userId: user.id,
       phone: user.phone || optionalString(req.body?.phone) || null,
@@ -2193,7 +2389,13 @@ app.post('/api/audit/session', async (req, res) => {
 
     const supabase = getSupabase();
     if (supabase) {
-      studentId = await ensureVerifiedUser(studentId, typeof context.phone === 'string' ? context.phone : null);
+      const authorization = req.header('authorization');
+      if (authorization) {
+        const auth = await requireAuthenticatedUser(req);
+        studentId = auth.user.id;
+      } else {
+        studentId = await ensureVerifiedUser(studentId, typeof context.phone === 'string' ? context.phone : null);
+      }
 
       const role = await supabase.from('career_roles').select('id').eq('id', targetRoleId).eq('status', 'published').maybeSingle();
       if (role.error) throw new PersistenceError('audit_session_role_read', role.error.message);
@@ -2560,26 +2762,8 @@ Speak in 1-2 conversational sentences.`,
   }
 });
 
-function verifyServiceToken(providedHeader: string | undefined, expectedToken: string | undefined): boolean {
-  if (!expectedToken) return true; // development mode if unconfigured
-  if (!providedHeader || !providedHeader.startsWith('Bearer ')) return false;
-  const provided = providedHeader.slice(7).trim();
-  if (!provided) return false;
-  const h1 = crypto.createHash('sha256').update(expectedToken).digest();
-  const h2 = crypto.createHash('sha256').update(provided).digest();
-  return crypto.timingSafeEqual(h1, h2);
-}
-
 app.post('/api/audit/evidence/signal', async (req, res) => {
   try {
-    const authorization = req.header('authorization');
-    const serviceToken = serverConfig.careervoiceServiceToken || serverConfig.pipecatServiceToken || process.env.CAREERVOICE_SERVICE_TOKEN;
-    if (authorization) {
-      if (!serviceToken || !verifyServiceToken(authorization, serviceToken)) {
-        return apiError(res, 401, 'INVALID_SERVICE_TOKEN', 'Evidence signal token is invalid.');
-      }
-    }
-
     const signal = parseSkillSignalInput(req.body);
     if (signal.auditId.startsWith('dev_audit_') && devAuditSessions.has(signal.auditId)) {
       return res.status(201).json({
@@ -2589,12 +2773,28 @@ app.post('/api/audit/evidence/signal', async (req, res) => {
         devMode: true,
       });
     }
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
-    await getAuditSession(supabase, signal.auditId);
+
+    const { supabase, user, isService } = await authenticateRequest(req);
+    const session = await getAuditSession(supabase, signal.auditId);
+
+    // Derive user_id from req.authUser.id rather than trusting client-supplied user ID
+    if (user) {
+      if (signal.studentId && signal.studentId !== user.id) {
+        return apiError(res, 403, 'FORBIDDEN', 'studentId does not match the authenticated user.');
+      }
+      signal.studentId = user.id;
+    }
+
+    if (!isService && user && session.user_id !== user.id) {
+      return apiError(res, 403, 'FORBIDDEN', 'studentId does not match the audit session.');
+    }
+
     const persisted = await persistSkillSignal(supabase, signal);
     return res.status(201).json({ success: true, ...persisted });
   } catch (error) {
+    if (error instanceof AuthSessionError) {
+      return apiError(res, error.status, error.code, error.message);
+    }
     if (error instanceof PersistenceError && error.operation === 'skill_signal_authorization') {
       return apiError(res, 403, 'FORBIDDEN', error.message);
     }
@@ -2621,10 +2821,12 @@ app.post('/api/audit/:auditId/evidence', async (req, res) => {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
 
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
-
+    const { supabase, user, isService } = await authenticateRequest(req);
     const session = await getAuditSession(supabase, auditId);
+    if (!isService && user && session.user_id !== user.id) {
+      return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
+    }
+
     const evidenceType = requiredString(req.body?.evidenceType, 'evidenceType');
     const rawText = requiredString(req.body?.rawText, 'rawText');
     const source = requiredString(req.body?.source, 'source');
@@ -2749,8 +2951,11 @@ app.post('/api/audit/:auditId/finalize', async (req, res) => {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
 
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
+    const { supabase, user, isService } = await authenticateRequest(req);
+    const session = await getAuditSession(supabase, auditId);
+    if (!isService && user && session.user_id !== user.id) {
+      return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
+    }
     if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const report = await finalizeCareerAudit(supabase, auditId);
     return res.json({

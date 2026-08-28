@@ -5,6 +5,8 @@ import { Phone, ShieldCheck, ArrowRight, AlertCircle, RefreshCw, ChevronDown, Lo
 import { useVoiceInteraction } from '../../hooks/useVoiceInteraction';
 import { logCareerVoiceEvent } from '../../domain/careerVoiceFlow';
 
+import { setAuthSession, getAuthSession } from '../../lib/supabaseBrowser';
+
 interface PhoneOtpStepProps {
   onVerified: (identity: UserIdentity) => void;
   trackEvent: (eventName: string, metadata?: Record<string, unknown>) => void;
@@ -124,14 +126,45 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
         return;
       }
 
+      console.info('[AUTH] WhatsApp OTP verified');
+      console.info('[AUTH] session response received', {
+        hasAccessToken: Boolean(data.session?.access_token),
+        hasRefreshToken: Boolean(data.session?.refresh_token),
+      });
+
+      // Establish legitimate Supabase browser session if tokens returned
+      let effectiveAccessToken = typeof data.accessToken === 'string' ? data.accessToken : undefined;
+      let effectiveStudentId = data.studentId;
+
+      if (data.session?.access_token && data.session?.refresh_token) {
+        try {
+          const establishedSession = await setAuthSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          });
+          if (establishedSession?.access_token) {
+            effectiveAccessToken = establishedSession.access_token;
+            if (establishedSession.user?.id) {
+              effectiveStudentId = establishedSession.user.id;
+            }
+          }
+          console.info('[AUTH] browser session established', {
+            userId: establishedSession?.user?.id || effectiveStudentId,
+            hasAccessToken: Boolean(establishedSession?.access_token),
+          });
+        } catch (sessionErr) {
+          console.warn('[AUTH] Warning establishing browser session:', sessionErr);
+        }
+      }
+
       trackEvent('otp_verified');
-      logCareerVoiceEvent('otp_verify_success', { phone: data.phone || fullPhone, studentId: data.studentId });
+      logCareerVoiceEvent('otp_verify_success', { phone: data.phone || fullPhone, studentId: effectiveStudentId });
       onVerified({
         phone: data.phone || fullPhone,
         countryCode: selectedCountry.code,
         isOtpVerified: true,
-        studentId: data.studentId,
-        accessToken: typeof data.accessToken === 'string' ? data.accessToken : undefined,
+        studentId: effectiveStudentId,
+        accessToken: effectiveAccessToken,
         anonymousId: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
       });

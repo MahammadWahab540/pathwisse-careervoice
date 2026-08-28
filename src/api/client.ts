@@ -1,4 +1,6 @@
-﻿export class ApiClientError extends Error {
+import { getBrowserSupabase } from '../lib/supabaseBrowser';
+
+export class ApiClientError extends Error {
   readonly code: string;
   readonly status: number;
   readonly details?: unknown;
@@ -12,14 +14,58 @@
   }
 }
 
+export async function getValidAccessToken(): Promise<string | null> {
+  try {
+    const supabase = getBrowserSupabase();
+    const { data, error } = await supabase.auth.getSession();
+    if (!error && data?.session?.access_token) {
+      return data.session.access_token;
+    }
+  } catch (err) {
+    console.warn('[AUTH] Error fetching session from Supabase browser client:', err);
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('careervoice_supabase_access_token');
+    if (stored && stored !== 'undefined' && stored !== 'null') {
+      return stored;
+    }
+  }
+
+  return null;
+}
+
+export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = await getValidAccessToken();
+  if (!token) {
+    throw new ApiClientError('AUTH_SESSION_MISSING', 401, 'AUTH_SESSION_MISSING');
+  }
+
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Content-Type') && options.body && typeof options.body === 'string') {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (!headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return fetch(url, {
+    ...options,
+    headers,
+  });
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && options.body && typeof options.body === 'string') {
     headers.set('Content-Type', 'application/json');
   }
-  if (!headers.has('Authorization') && typeof localStorage !== 'undefined') {
-    const token = localStorage.getItem('careervoice_supabase_access_token');
-    if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  if (!headers.has('Authorization')) {
+    const token = await getValidAccessToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
   }
 
   const response = await fetch(url, {
@@ -53,3 +99,4 @@ export const api = {
       headers,
     }),
 };
+
