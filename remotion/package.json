@@ -1,0 +1,23 @@
+{
+  "name": "careervoice-remotion",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "remotion studio --no-open src/index.ts",
+    "build": "remotion compositions src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "render:degree": "remotion render src/index.ts CareerVoiceDegreeIsNotVerdict out/CareerVoiceDegreeIsNotVerdict.mp4 --codec=h264"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.506",
+    "@remotion/media": "4.0.506",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.506"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.2"
+  }
+}
