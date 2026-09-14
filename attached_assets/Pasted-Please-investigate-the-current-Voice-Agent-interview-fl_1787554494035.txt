@@ -1,0 +1,51 @@
+Please investigate the current Voice Agent interview flow and produce a root-cause report. Do not modify code yet.
+
+User-reported issues:
+1. After selecting a career role, the AI does not immediately start speaking the interview introduction and first question. There is a noticeable delay, and sometimes the user must click “Play Audio” before hearing anything.
+2. After the AI asks a question, the voice/microphone icon appears not clickable or responsive, so the user cannot activate voice input.
+
+Expected flow:
+Select Career → AI Automatically Asks Question → User Clicks Voice Icon → Microphone Activates → User Answers → AI Processes Answer → AI Asks Next Question
+
+Please inspect these likely causes specifically:
+
+1. Auto-speech timing
+- Check whether initial AI speech is triggered inside React useEffect instead of directly from a user click.
+- Verify whether browser autoplay / speechSynthesis restrictions could block the first spoken question.
+- Check whether speechSynthesis onstart, onend, and onerror are logged or handled.
+- Confirm whether the UI assumes speech started even if the browser blocked it.
+
+2. Delay after career selection
+- Trace the full state flow after career selection.
+- Check whether the app goes through role explanation, competency loading, or another screen before the actual interview starts.
+- Identify any async calls, loading states, or timers causing delay before the first question is ready.
+
+3. Microphone button responsiveness
+- Confirm the mic button has a working click handler.
+- Check whether any state disables the button or prevents clicking after AI finishes speaking.
+- Check whether any overlay, modal, bottom panel, or z-index layer could block clicks on the mic icon, especially on mobile.
+
+4. Microphone permission handling
+- Inspect getUserMedia usage.
+- Check what happens when permission is denied, blocked, pending, unavailable, or unsupported.
+- Verify whether errors are visible to the user or only stored internally.
+- Confirm whether the app shows “requesting microphone,” “permission blocked,” and “listening” states clearly.
+
+5. Web Speech Recognition stability
+- Check whether SpeechRecognition / webkitSpeechRecognition is supported in the target browser.
+- Verify whether the recognition instance is recreated on re-renders.
+- Check whether recognition.start() errors are swallowed.
+- Confirm whether the app only marks the mic as listening after the recognition onstart event fires.
+
+6. Browser/device compatibility
+- Check behavior in Chrome desktop, Chrome Android, Safari iOS, and Firefox if possible.
+- Confirm whether Replit preview iframe or non-production URL affects microphone/speech permissions.
+- Confirm whether HTTPS and permission context are valid.
+
+Please return a structured report with:
+- Confirmed issues
+- Likely root causes ranked High / Medium / Low confidence
+- Evidence from the implementation or runtime behavior
+- Exact recommended fixes
+- Whether this needs code changes, browser testing, or deployment/publish testing
+- Do not implement fixes until I approve

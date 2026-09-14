@@ -1,0 +1,30 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "hrbE5b6akOQ6WDyBCQT_d"
+uri = "file://artifacts/qalam-adaptive-e2e/qalam-adaptive-e2e-screenshots.zip"
+type = "unspecified"
+title = "Qalam Adaptive E2E screenshots"
+description = "Desktop and mobile screenshots covering landing, all six adaptive tools, evidence submission, carousel states, and responsive checks."
+logical_id = "89791853-797f-4085-88e2-6a6292f6cc4d"
+content_hash = "sha256:7d6817cf60ac2557fc2718d7c92b38cc9cb0ee202f9fb83d102d2a87afa24ed7"
+size = 1780085
+mtime_ms = 1787350808224
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:85669858-c3bd-419b-8ab6-5b3770ac0b0a/89791853-797f-4085-88e2-6a6292f6cc4d/90521b84-3a39-41ba-b0f5-8bc113499797"
+storage_version_token = "1787350842625759"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hwr4G2ZXAV8g9dAhMBlHu"
+uri = "file://artifacts/qalam-adaptive-e2e/final-report.json"
+type = "unspecified"
+title = "Qalam Adaptive E2E PASS/FAIL report"
+description = "Final validation report with automated gates, API/Live checks, coverage, console/network results, limitations, and reproduction steps."
+logical_id = "9ee9940c-34f1-44c9-a7c4-8384fafebd40"
+content_hash = "sha256:243318599b1de5fb3de735581bdaed33b42e0d19f5e4bc7ae7a895012da668fb"
+size = 7610
+mtime_ms = 1787350840518
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:85669858-c3bd-419b-8ab6-5b3770ac0b0a/9ee9940c-34f1-44c9-a7c4-8384fafebd40/d551bcfc-d02d-423a-9080-da50b8ce1394"
+storage_version_token = "1787350843922149"
+content_type = "application/octet-stream"
