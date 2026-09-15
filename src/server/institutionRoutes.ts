@@ -12,6 +12,14 @@ function bearer(req: Request): string | null {
   return value.startsWith('Bearer ') ? value.slice(7).trim() : null;
 }
 
+function normalizeExpiry(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') throw new Error('INVALID_EXPIRY');
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) throw new Error('INVALID_EXPIRY');
+  return parsed.toISOString();
+}
+
 export async function authenticateInstitutionRequest(req: AuthedRequest, res: Response, supabase: SupabaseClient): Promise<string | null> {
   const token = bearer(req);
   if (!token) {
@@ -82,12 +90,14 @@ export function registerInstitutionRoutes(app: any, supabase: SupabaseClient) {
       const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code:'COLLEGE_MEMBERSHIP_REQUIRED' });
       const department = scopedDepartment(req.body?.department, membership.department);
       const token = crypto.randomBytes(24).toString('base64url');
-      const row = { token, college_id: membership.college_id, department, campaign: typeof req.body?.campaign === 'string' ? req.body.campaign.trim().slice(0,120) : null, expires_at: req.body?.expiresAt || null, created_by: userId, status:'active' };
+      const expiresAt = normalizeExpiry(req.body?.expiresAt);
+      const row = { token, college_id: membership.college_id, department, campaign: typeof req.body?.campaign === 'string' ? req.body.campaign.trim().slice(0,120) : null, expires_at: expiresAt, created_by: userId, status:'active' };
       const result = await supabase.from('career_voice_share_links').insert(row).select('id,token,college_id,department,campaign,status,expires_at,usage_count').single();
       if (result.error) throw result.error;
       const x:any=result.data; res.status(201).json({ link:{ id:x.id, token:x.token, collegeId:x.college_id, department:x.department, campaign:x.campaign, status:x.status, expiresAt:x.expires_at, usageCount:x.usage_count } });
     } catch(error:any) {
       if (error.message === 'DEPARTMENT_SCOPE_VIOLATION') return res.status(403).json({ code:'DEPARTMENT_SCOPE_VIOLATION' });
+      if (error.message === 'INVALID_EXPIRY') return res.status(400).json({ code:'INVALID_EXPIRY', message:'expiresAt must be a future ISO date' });
       res.status(500).json({ code:'SHARE_LINK_CREATE_FAILED', message:error.message });
     }
   });
@@ -105,10 +115,13 @@ export function registerInstitutionRoutes(app: any, supabase: SupabaseClient) {
 
   app.get('/api/share/:token', async (req: Request,res:Response) => {
     try {
-      const result=await supabase.from('career_voice_share_links').select('id,token,college_id,department,campaign,status,expires_at').eq('token',req.params.token).maybeSingle();
+      const result=await supabase.from('career_voice_share_links').select('id,token,college_id,department,campaign,status,expires_at,usage_count').eq('token',req.params.token).maybeSingle();
       if(result.error)throw result.error; const x:any=result.data;
       if(!x || !shareLinkIsUsable(x)) return res.status(404).json({code:'SHARE_LINK_INVALID'});
-      res.json({link:{id:x.id,token:x.token,collegeId:x.college_id,department:x.department,campaign:x.campaign,status:'active',expiresAt:x.expires_at}});
+      const usageCount = Number(x.usage_count || 0) + 1;
+      const usageResult = await supabase.from('career_voice_share_links').update({ usage_count: usageCount, last_used_at: new Date().toISOString() }).eq('id', x.id);
+      if (usageResult.error) console.warn('share_link_usage_tracking_notice', usageResult.error.message);
+      res.json({link:{id:x.id,token:x.token,collegeId:x.college_id,department:x.department,campaign:x.campaign,status:'active',expiresAt:x.expires_at,usageCount}});
     } catch(error:any){res.status(500).json({code:'SHARE_LINK_RESOLVE_FAILED',message:error.message});}
   });
 
