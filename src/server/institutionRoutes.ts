@@ -12,11 +12,11 @@ function bearer(req: Request): string | null {
   return value.startsWith('Bearer ') ? value.slice(7).trim() : null;
 }
 
-function normalizeExpiry(value: unknown): string | null {
+export function normalizeExpiry(value: unknown, nowMs = Date.now()): string | null {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'string') throw new Error('INVALID_EXPIRY');
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) throw new Error('INVALID_EXPIRY');
+  if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= nowMs) throw new Error('INVALID_EXPIRY');
   return parsed.toISOString();
 }
 
@@ -35,7 +35,7 @@ async function membershipForUser(supabase: SupabaseClient, userId: string) {
   return result.data;
 }
 
-function scopedDepartment(requested: unknown, membershipDepartment: string | null | undefined): string | null {
+export function scopedDepartment(requested: unknown, membershipDepartment: string | null | undefined): string | null {
   const normalized = normalizeDepartment(requested);
   if (membershipDepartment && normalized && normalized !== membershipDepartment) throw new Error('DEPARTMENT_SCOPE_VIOLATION');
   return membershipDepartment || normalized;
@@ -58,77 +58,76 @@ export function registerInstitutionRoutes(app: any, supabase: SupabaseClient) {
       const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
       const collegeId = typeof req.body?.collegeId === 'string' ? req.body.collegeId.trim() : '';
       const role = req.body?.role as InstitutionRole;
-      if (!UUID_RE.test(collegeId) || !['placement_team','college_management'].includes(role)) return res.status(400).json({ code: 'INVALID_MEMBERSHIP', message: 'Valid collegeId and institution role are required' });
+      if (!UUID_RE.test(collegeId)) return res.status(400).json({ code: 'INVALID_COLLEGE_ID', message: 'collegeId must be a UUID' });
+      if (!['placement_team','college_management'].includes(role)) return res.status(400).json({ code: 'INVALID_INSTITUTION_ROLE', message: 'Institution role required' });
       const department = normalizeDepartment(req.body?.department);
-      const result = await supabase.from('college_memberships').upsert({ user_id: userId, college_id: collegeId, department, role }, { onConflict: 'user_id,college_id' }).select('id,college_id,department,role').single();
+      const result = await supabase.from('college_memberships').upsert({ user_id: userId, college_id: collegeId, department, role, updated_at: new Date().toISOString() }, { onConflict: 'user_id,college_id,department' }).select('id,college_id,department,role').single();
       if (result.error) throw result.error;
-      res.json({ success: true, membership: { id: result.data.id, collegeId: result.data.college_id, department: result.data.department, role: result.data.role } });
-    } catch (error: any) { res.status(500).json({ code: 'MEMBERSHIP_SAVE_FAILED', message: error.message }); }
+      res.json({ success: true, membership: result.data });
+    } catch (error: any) { res.status(500).json({ code: 'INSTITUTION_SAVE_FAILED', message: error.message }); }
   });
 
   app.get('/api/college/share-links', async (req: AuthedRequest, res: Response) => {
     try {
       const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
-      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'COLLEGE_MEMBERSHIP_REQUIRED' });
-      let query = supabase.from('career_voice_share_links').select('id,token,college_id,department,campaign,status,expires_at,usage_count').eq('college_id', membership.college_id);
+      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'INSTITUTION_MEMBERSHIP_REQUIRED' });
+      let query = supabase.from('career_voice_share_links').select('*').eq('college_id', membership.college_id).order('created_at', { ascending: false });
       if (membership.department) query = query.eq('department', membership.department);
-      const result = await query.order('created_at', { ascending: false });
-      if (result.error) throw result.error;
-      res.json({ links: (result.data || []).map((x:any) => ({ id:x.id, token:x.token, collegeId:x.college_id, department:x.department, campaign:x.campaign, status:x.status, expiresAt:x.expires_at, usageCount:x.usage_count })) });
-    } catch (error:any) { res.status(500).json({ code:'SHARE_LINK_LIST_FAILED', message:error.message }); }
+      const result = await query; if (result.error) throw result.error;
+      res.json({ links: result.data || [] });
+    } catch (error: any) { res.status(500).json({ code: 'SHARE_LINK_LIST_FAILED', message: error.message }); }
   });
 
   app.post('/api/college/share-links', async (req: AuthedRequest, res: Response) => {
     try {
       const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
-      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code:'COLLEGE_MEMBERSHIP_REQUIRED' });
-      const department = scopedDepartment(req.body?.department, membership.department);
+      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'INSTITUTION_MEMBERSHIP_REQUIRED' });
+      let department: string | null;
+      try { department = scopedDepartment(req.body?.department, membership.department); }
+      catch { return res.status(403).json({ code: 'DEPARTMENT_SCOPE_VIOLATION', message: 'Cannot create a link outside your department' }); }
+      let expiresAt: string | null;
+      try { expiresAt = normalizeExpiry(req.body?.expiresAt); }
+      catch { return res.status(400).json({ code: 'INVALID_EXPIRY', message: 'expiresAt must be a future ISO date' }); }
       const token = crypto.randomBytes(24).toString('base64url');
-      const expiresAt = normalizeExpiry(req.body?.expiresAt);
-      const row = { token, college_id: membership.college_id, department, campaign: typeof req.body?.campaign === 'string' ? req.body.campaign.trim().slice(0,120) : null, expires_at: expiresAt, created_by: userId, status:'active' };
-      const result = await supabase.from('career_voice_share_links').insert(row).select('id,token,college_id,department,campaign,status,expires_at,usage_count').single();
+      const result = await supabase.from('career_voice_share_links').insert({ college_id: membership.college_id, department, campaign_name: req.body?.campaignName || null, token, created_by: userId, expires_at: expiresAt }).select('*').single();
       if (result.error) throw result.error;
-      const x:any=result.data; res.status(201).json({ link:{ id:x.id, token:x.token, collegeId:x.college_id, department:x.department, campaign:x.campaign, status:x.status, expiresAt:x.expires_at, usageCount:x.usage_count } });
-    } catch(error:any) {
-      if (error.message === 'DEPARTMENT_SCOPE_VIOLATION') return res.status(403).json({ code:'DEPARTMENT_SCOPE_VIOLATION' });
-      if (error.message === 'INVALID_EXPIRY') return res.status(400).json({ code:'INVALID_EXPIRY', message:'expiresAt must be a future ISO date' });
-      res.status(500).json({ code:'SHARE_LINK_CREATE_FAILED', message:error.message });
-    }
+      res.status(201).json({ link: result.data });
+    } catch (error: any) { res.status(500).json({ code: 'SHARE_LINK_CREATE_FAILED', message: error.message }); }
   });
 
-  app.post('/api/college/share-links/:id/revoke', async (req: AuthedRequest, res: Response) => {
+  app.delete('/api/college/share-links/:id', async (req: AuthedRequest, res: Response) => {
     try {
-      const userId = await authenticateInstitutionRequest(req,res,supabase); if(!userId)return;
-      const membership=await membershipForUser(supabase,userId); if(!membership)return res.status(403).json({code:'COLLEGE_MEMBERSHIP_REQUIRED'});
-      let query=supabase.from('career_voice_share_links').update({status:'revoked',revoked_at:new Date().toISOString()}).eq('id',req.params.id).eq('college_id',membership.college_id);
-      if (membership.department) query=query.eq('department',membership.department);
-      const result=await query.select('id').maybeSingle();
-      if(result.error)throw result.error; if(!result.data)return res.status(404).json({code:'SHARE_LINK_NOT_FOUND'}); res.json({success:true});
-    } catch(error:any){res.status(500).json({code:'SHARE_LINK_REVOKE_FAILED',message:error.message});}
+      const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
+      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'INSTITUTION_MEMBERSHIP_REQUIRED' });
+      let query = supabase.from('career_voice_share_links').update({ status: 'revoked', revoked_at: new Date().toISOString() }).eq('id', req.params.id).eq('college_id', membership.college_id);
+      if (membership.department) query = query.eq('department', membership.department);
+      const result = await query.select('id').maybeSingle(); if (result.error) throw result.error;
+      if (!result.data) return res.status(404).json({ code: 'SHARE_LINK_NOT_FOUND' });
+      res.json({ success: true });
+    } catch (error: any) { res.status(500).json({ code: 'SHARE_LINK_REVOKE_FAILED', message: error.message }); }
   });
 
-  app.get('/api/share/:token', async (req: Request,res:Response) => {
+  app.get('/api/share/:token', async (req: Request, res: Response) => {
     try {
-      const result=await supabase.from('career_voice_share_links').select('id,token,college_id,department,campaign,status,expires_at,usage_count').eq('token',req.params.token).maybeSingle();
-      if(result.error)throw result.error; const x:any=result.data;
-      if(!x || !shareLinkIsUsable(x)) return res.status(404).json({code:'SHARE_LINK_INVALID'});
-      const usageCount = Number(x.usage_count || 0) + 1;
-      const usageResult = await supabase.from('career_voice_share_links').update({ usage_count: usageCount }).eq('id', x.id);
-      if (usageResult.error) console.warn('share_link_usage_tracking_notice', usageResult.error.message);
-      res.json({link:{id:x.id,token:x.token,collegeId:x.college_id,department:x.department,campaign:x.campaign,status:'active',expiresAt:x.expires_at,usageCount}});
-    } catch(error:any){res.status(500).json({code:'SHARE_LINK_RESOLVE_FAILED',message:error.message});}
+      const result = await supabase.from('career_voice_share_links').select('id,college_id,department,campaign_name,status,expires_at,usage_count').eq('token', req.params.token).maybeSingle();
+      if (result.error) throw result.error;
+      if (!result.data || !shareLinkIsUsable(result.data)) return res.status(404).json({ code: 'SHARE_LINK_INVALID' });
+      const nextUsageCount = Number(result.data.usage_count || 0) + 1;
+      const usageUpdate = await supabase.from('career_voice_share_links').update({ usage_count: nextUsageCount }).eq('id', result.data.id);
+      if (usageUpdate.error) console.warn('share_link_usage_count_notice', usageUpdate.error.message);
+      res.json({ context: { ...result.data, usage_count: nextUsageCount } });
+    } catch (error: any) { res.status(500).json({ code: 'SHARE_LINK_RESOLVE_FAILED', message: error.message }); }
   });
 
-  app.get('/api/college/analytics', async (req: AuthedRequest,res:Response) => {
+  app.get('/api/college/analytics', async (req: AuthedRequest, res: Response) => {
     try {
-      const userId=await authenticateInstitutionRequest(req,res,supabase); if(!userId)return;
-      const membership=await membershipForUser(supabase,userId); if(!membership)return res.status(403).json({code:'COLLEGE_MEMBERSHIP_REQUIRED'});
-      let query=supabase.from('audit_sessions').select('id,status,readiness_level,created_at,updated_at').eq('college_id',membership.college_id);
-      if (membership.department) query=query.eq('department',membership.department);
-      const result=await query.order('created_at',{ascending:false}).limit(250);
-      if(result.error)throw result.error; const sessions:any[]=result.data||[]; const completed=sessions.filter(x=>x.status==='completed'); const readinessDistribution:Record<string,number>={};
-      for(const item of completed){const key=item.readiness_level||'unknown'; readinessDistribution[key]=(readinessDistribution[key]||0)+1;}
-      res.json({totalSessions:sessions.length,completedSessions:completed.length,completionRate:sessions.length?completed.length/sessions.length:0,readinessDistribution,recentSessions:sessions.slice(0,20)});
-    } catch(error:any){res.status(500).json({code:'COLLEGE_ANALYTICS_FAILED',message:error.message});}
+      const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
+      const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'INSTITUTION_MEMBERSHIP_REQUIRED' });
+      let query = supabase.from('audit_sessions').select('id,status,overall_score,created_at,department').eq('college_id', membership.college_id).order('created_at', { ascending: false }).limit(1000);
+      if (membership.department) query = query.eq('department', membership.department);
+      const result = await query; if (result.error) throw result.error;
+      const sessions = result.data || []; const completed = sessions.filter((s:any) => ['completed','ready_for_report'].includes(s.status));
+      res.json({ totalSessions: sessions.length, completedSessions: completed.length, completionRate: sessions.length ? Math.round((completed.length/sessions.length)*100) : 0, readinessDistribution: { ready: completed.filter((s:any)=>Number(s.overall_score)>=75).length, developing: completed.filter((s:any)=>Number(s.overall_score)>=50 && Number(s.overall_score)<75).length, needsAttention: completed.filter((s:any)=>Number(s.overall_score)<50).length }, recentSessions: sessions.slice(0,10) });
+    } catch (error:any) { res.status(500).json({ code: 'COLLEGE_ANALYTICS_FAILED', message: error.message }); }
   });
 }
