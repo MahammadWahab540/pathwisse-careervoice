@@ -22,15 +22,9 @@ function normalizeExpiry(value: unknown): string | null {
 
 export async function authenticateInstitutionRequest(req: AuthedRequest, res: Response, supabase: SupabaseClient): Promise<string | null> {
   const token = bearer(req);
-  if (!token) {
-    res.status(401).json({ code: 'AUTH_SESSION_MISSING', message: 'Authentication required' });
-    return null;
-  }
+  if (!token) { res.status(401).json({ code: 'AUTH_SESSION_MISSING', message: 'Authentication required' }); return null; }
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) {
-    res.status(401).json({ code: 'AUTH_SESSION_INVALID', message: 'Invalid or expired session' });
-    return null;
-  }
+  if (error || !data.user) { res.status(401).json({ code: 'AUTH_SESSION_INVALID', message: 'Invalid or expired session' }); return null; }
   req.careerVoiceUserId = data.user.id;
   return data.user.id;
 }
@@ -119,7 +113,7 @@ export function registerInstitutionRoutes(app: any, supabase: SupabaseClient) {
       if(result.error)throw result.error; const x:any=result.data;
       if(!x || !shareLinkIsUsable(x)) return res.status(404).json({code:'SHARE_LINK_INVALID'});
       const usageCount = Number(x.usage_count || 0) + 1;
-      const usageResult = await supabase.from('career_voice_share_links').update({ usage_count: usageCount, last_used_at: new Date().toISOString() }).eq('id', x.id);
+      const usageResult = await supabase.from('career_voice_share_links').update({ usage_count: usageCount }).eq('id', x.id);
       if (usageResult.error) console.warn('share_link_usage_tracking_notice', usageResult.error.message);
       res.json({link:{id:x.id,token:x.token,collegeId:x.college_id,department:x.department,campaign:x.campaign,status:'active',expiresAt:x.expires_at,usageCount}});
     } catch(error:any){res.status(500).json({code:'SHARE_LINK_RESOLVE_FAILED',message:error.message});}
