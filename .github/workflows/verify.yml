@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/qalam-adaptive-tool-ui
+      - 'feat/hourly-sprint-*'
   pull_request:
 
 jobs:
@@ -18,6 +19,12 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Ensure institution routes are mounted
+        run: node scripts/ensure-institution-routes.mjs
+      - name: Verify route mount is present
+        run: |
+          grep -F "import { registerInstitutionRoutes } from './src/server/institutionRoutes';" server.ts
+          grep -F "registerInstitutionRoutes(app, institutionSupabase);" server.ts
       - name: Contract tests
         run: npm test
       - name: TypeScript verification
