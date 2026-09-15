@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts src/ai/*.test.ts"
+    "test": "tsx --test tests/*.test.ts src/ai/*.test.ts",
+    "validate:careervoice-crosswalk-structure": "tsx scripts/validate-career-voice-crosswalk.ts"
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.92.2",
