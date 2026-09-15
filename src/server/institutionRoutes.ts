@@ -123,11 +123,21 @@ export function registerInstitutionRoutes(app: any, supabase: SupabaseClient) {
     try {
       const userId = await authenticateInstitutionRequest(req, res, supabase); if (!userId) return;
       const membership = await membershipForUser(supabase, userId); if (!membership) return res.status(403).json({ code: 'INSTITUTION_MEMBERSHIP_REQUIRED' });
-      let query = supabase.from('audit_sessions').select('id,status,overall_score,created_at,department').eq('college_id', membership.college_id).order('created_at', { ascending: false }).limit(1000);
+      let query = supabase.from('audit_sessions').select('id,status,created_at,department').eq('college_id', membership.college_id).order('created_at', { ascending: false }).limit(1000);
       if (membership.department) query = query.eq('department', membership.department);
       const result = await query; if (result.error) throw result.error;
-      const sessions = result.data || []; const completed = sessions.filter((s:any) => ['completed','ready_for_report'].includes(s.status));
-      res.json({ totalSessions: sessions.length, completedSessions: completed.length, completionRate: sessions.length ? Math.round((completed.length/sessions.length)*100) : 0, readinessDistribution: { ready: completed.filter((s:any)=>Number(s.overall_score)>=75).length, developing: completed.filter((s:any)=>Number(s.overall_score)>=50 && Number(s.overall_score)<75).length, needsAttention: completed.filter((s:any)=>Number(s.overall_score)<50).length }, recentSessions: sessions.slice(0,10) });
+      const sessions = result.data || [];
+      const sessionIds = sessions.map((s: any) => s.id);
+      const scoreBySession = new Map<string, number>();
+      if (sessionIds.length) {
+        const reports = await supabase.from('audit_reports').select('session_id,overall_score').in('session_id', sessionIds);
+        if (reports.error) throw reports.error;
+        for (const report of reports.data || []) if (report.session_id && report.overall_score !== null) scoreBySession.set(report.session_id, Number(report.overall_score));
+      }
+      const enriched = sessions.map((s: any) => ({ ...s, overall_score: scoreBySession.get(s.id) ?? null }));
+      const completed = enriched.filter((s:any) => ['completed','ready_for_report'].includes(s.status));
+      const scored = completed.filter((s:any) => Number.isFinite(s.overall_score));
+      res.json({ totalSessions: enriched.length, completedSessions: completed.length, completionRate: enriched.length ? Math.round((completed.length/enriched.length)*100) : 0, readinessDistribution: { ready: scored.filter((s:any)=>s.overall_score>=75).length, developing: scored.filter((s:any)=>s.overall_score>=50 && s.overall_score<75).length, needsAttention: scored.filter((s:any)=>s.overall_score<50).length }, recentSessions: enriched.slice(0,10) });
     } catch (error:any) { res.status(500).json({ code: 'COLLEGE_ANALYTICS_FAILED', message: error.message }); }
   });
 }
