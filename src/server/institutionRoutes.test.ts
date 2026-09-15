@@ -17,9 +17,9 @@ test('CV-103 normalizes institution department input', () => {
 test('CV-104 rejects revoked and expired share links', () => {
   const future = new Date(Date.now() + 60_000).toISOString();
   const past = new Date(Date.now() - 60_000).toISOString();
-  assert.equal(shareLinkIsUsable({ status: 'active', expiresAt: future }), true);
-  assert.equal(shareLinkIsUsable({ status: 'revoked', expiresAt: future }), false);
-  assert.equal(shareLinkIsUsable({ status: 'active', expiresAt: past }), false);
+  assert.equal(shareLinkIsUsable({ status: 'active', expires_at: future }), true);
+  assert.equal(shareLinkIsUsable({ status: 'revoked', expires_at: future }), false);
+  assert.equal(shareLinkIsUsable({ status: 'active', expires_at: past }), false);
 });
 
 test('CV-105 analytics contract must stay aggregate-first', () => {
