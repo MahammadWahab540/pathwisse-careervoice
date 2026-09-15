@@ -142,14 +142,28 @@ test('report and roadmap handoff contracts preserve traceability fields', () => 
   const handoff: RoadmapHandoffContract = {
     contract: 'career-audit-roadmap-contract:v1',
     auditId: report.auditId,
-    roleId: report.roleId,
-    readinessStatus: report.readinessStatus,
-    recommendations: report.recommendations,
+    studentId: 'c01afcf5-22a5-49f2-9fe0-2a739bbfaec4',
+    targetRoleId: report.roleId,
+    readinessScore: report.readinessScore,
+    priorityGaps: [{
+      gapId: 'gap-testing',
+      skillId: report.gaps[0].skillId,
+      skillName: report.gaps[0].skillName,
+      expectedScore: report.gaps[0].expectedScore,
+      demonstratedScore: report.gaps[0].demonstratedScore,
+      gapScore: report.gaps[0].gap,
+      priority: report.gaps[0].priority,
+      mappingStatus: report.recommendations[0].mappingStatus,
+      recommendedStageIds: [],
+      evidenceIds: report.gaps[0].evidenceIds,
+    }],
   };
 
   assert.equal(report.gaps[0].evidenceIds[0], 'evidence-2');
   assert.equal(handoff.contract, 'career-audit-roadmap-contract:v1');
-  assert.equal(handoff.recommendations[0].mappingStatus, 'UNMAPPED');
+  assert.equal(handoff.targetRoleId, report.roleId);
+  assert.equal(handoff.priorityGaps[0].mappingStatus, 'UNMAPPED');
+  assert.equal(handoff.priorityGaps[0].evidenceIds[0], 'evidence-2');
 });
 
 test('role fit changes with student evidence instead of card position', () => {
@@ -338,4 +352,3 @@ test('audit transition rejects stale state and never regresses to a prior stage'
   assert.equal(result.action, 'COMPLETE');
   assert.equal(result.nextStage, 'execution_stage');
 });
-

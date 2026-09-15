@@ -137,12 +137,28 @@ export interface AuditReportContract {
   recommendations: AuditRecommendation[];
 }
 
+export interface RoadmapHandoffPriorityGap {
+  gapId: string;
+  skillId: string;
+  skillName: string;
+  expectedScore: number;
+  demonstratedScore: number;
+  gapScore: number;
+  priority: GapPriority;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  recommendedPathwisseSkillId?: string;
+  recommendedStageIds: string[];
+  evidenceIds: string[];
+}
+
+/** The exact v1 payload persisted in audit_reports.personalised_roadmap. */
 export interface RoadmapHandoffContract {
   contract: 'career-audit-roadmap-contract:v1';
   auditId: string;
-  roleId: string;
-  readinessStatus: ReadinessStatus;
-  recommendations: AuditRecommendation[];
+  studentId: string;
+  targetRoleId: string;
+  readinessScore: number;
+  priorityGaps: RoadmapHandoffPriorityGap[];
 }
 
 export interface RoleFitProfile {
@@ -573,4 +589,3 @@ export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): Ro
 
   return { roleId: role.roleId, matchScore, fitBand, fitReasons };
 }
-

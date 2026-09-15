@@ -3,6 +3,7 @@ import type {
   EvidenceStrength,
   GapPriority,
   ReadinessStatus,
+  RoadmapHandoffContract,
   SkillSignalInput,
 } from '../domain/careerAudit';
 
@@ -163,23 +164,4 @@ export interface CareerAuditReportResponse {
   }>;
 }
 
-export interface CareerAuditRoadmapHandoffV1 {
-  contract: 'career-audit-roadmap-contract:v1';
-  auditId: string;
-  studentId: string;
-  targetRoleId: string;
-  readinessScore: number;
-  priorityGaps: Array<{
-    gapId: string;
-    skillId: string;
-    skillName: string;
-    expectedScore: number;
-    demonstratedScore: number;
-    gapScore: number;
-    priority: GapPriority;
-    mappingStatus: 'MAPPED' | 'UNMAPPED';
-    recommendedPathwisseSkillId?: string;
-    recommendedStageIds: string[];
-    evidenceIds: string[];
-  }>;
-}
+export type CareerAuditRoadmapHandoffV1 = RoadmapHandoffContract;
