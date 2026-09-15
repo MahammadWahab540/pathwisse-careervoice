@@ -36,4 +36,3 @@ See `docs/qa/careervoice-cycle-20260915-0717-qa-sheet.csv`.
 - The project `npm test` wrapper is blocked in this runtime by IPC pipe permissions; the direct Node runner passed.
 - Supabase runtime validation ran against project `pfzjbazocmgflcogjjrg`; Task 2 still has 110 unmapped Pathwisse lineage rows.
 - No merge or production deployment was performed.
-

@@ -59,4 +59,3 @@ Tasks 1, 3, 4, and 5 are validated by local tests/build in this environment. Tas
 2. Re-run `scripts/validate-career-voice-mappings.sql` against a safe Supabase branch/test environment, then production only after review.
 3. Reconcile migration timestamp drift between repo `20260821213000_career_voice_evidence_scoring.sql` and applied project migration `20260821160033_career_voice_evidence_scoring`.
 4. Continue with Task 6 only after Task 2 mapping lineage passes, because frontend handoff quality depends on mapped roadmap lineage.
-

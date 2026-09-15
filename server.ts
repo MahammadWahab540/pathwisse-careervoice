@@ -67,6 +67,7 @@ import {
   getPersistedHandoff,
   getPersistedReport,
 } from './src/server/finalizeAudit';
+import { canAccessAuditSession } from './src/server/auditAuthorization';
 import {
   SEED_CAREER_STREAMS,
   SEED_CAREER_ROLES,
@@ -597,6 +598,9 @@ function handleRouteError(res: express.Response, error: unknown, operation: stri
   }
   if (error instanceof AuditFinalizationError) {
     return apiError(res, error.status, error.code, error.message);
+  }
+  if (error instanceof Error && error.message === 'SUPABASE_NOT_CONFIGURED') {
+    return apiError(res, 503, 'DATABASE_UNAVAILABLE', 'Career audit database is temporarily unavailable.');
   }
   if (error instanceof PersistenceError) {
     const notFound = /not found/i.test(error.message);
@@ -2809,112 +2813,13 @@ app.post('/api/audit/:auditId/evidence', async (req, res) => {
 app.post('/api/audit/:auditId/finalize', async (req, res) => {
   try {
     const auditId = requiredString(req.params.auditId, 'auditId');
-    const devSession = devAuditSessions.get(auditId);
-    if (devSession) {
-      devSession.status = 'completed';
-      const targetRole = await resolveGuidanceRole(devSession.target_role_id, String(devSession.context.branch || 'Engineering'));
-      const roleTitle = targetRole.title || String(devSession.context.targetRole || 'Career Specialist');
-      const keySkill = targetRole.keySkills[0] || 'Domain Fundamentals';
-      return res.json({
-        success: true,
-        auditId,
-        auditSessionId: auditId,
-        targetRoleId: devSession.target_role_id,
-        targetRole: roleTitle,
-        overallScore: 58,
-        readinessStatus: 'Developing',
-        hiringBenchmark: 75,
-        distanceFromBenchmark: 17,
-        dimensionScores: {
-          careerClarity: 68,
-          technicalReadiness: 55,
-          projectReadiness: 50,
-          communication: 62,
-          placementReadiness: 54,
-          executionReadiness: 60,
-        },
-        diagnosisSummary: `Local dev evaluation completed for ${roleTitle}. This deterministic report is for testing the frontend flow because Gemini is not configured locally.`,
-        whyRoleFits: [
-          `${roleTitle} matches the selected career direction.`,
-          `The audit captured initial evidence around ${keySkill}.`,
-          'More project-level proof is needed before marking the student placement-ready.',
-        ],
-        strengths: [
-          {
-            skillId: 'dev_strength_1',
-            skillName: keySkill,
-            demonstratedScore: 60,
-            evidence: 'Student provided conversational evidence during the dev audit.',
-            confidenceScore: 65,
-            whyItMatters: `${keySkill} is a core competency for ${roleTitle}.`,
-          },
-        ],
-        gaps: [
-          {
-            gapId: 'dev_gap_1',
-            skillId: 'dev_skill_1',
-            skillName: targetRole.keySkills[1] || 'Project Evidence',
-            expectedScore: 75,
-            demonstratedScore: 45,
-            gap: 30,
-            priorityWeight: 80,
-            weightedGap: 24,
-            priority: 'High',
-            evidenceIds: [],
-            signalIds: [],
-            evidenceBasis: 'No persisted project artifact was uploaded in this local dev audit.',
-            recommendedAction: 'Add one role-specific project with screenshots, calculations, design files, or implementation notes.',
-            mappingStatus: 'UNMAPPED',
-            recommendedStageIds: [],
-          },
-        ],
-        evidenceLedger: [
-          {
-            skillId: 'dev_skill_1',
-            skillName: keySkill,
-            observedEvidence: devSession.messages.filter((m) => m.actor === 'user').map((m) => m.content).slice(0, 3),
-            missingEvidence: ['Project files', 'Internship proof', 'Tool-specific screenshots or calculations'],
-            weakEvidence: [],
-            contradictoryEvidence: [],
-          },
-        ],
-        priorityRecommendations: [
-          {
-            recommendationId: 'dev_rec_1',
-            gapId: 'dev_gap_1',
-            rank: 1,
-            recommendedAction: `Build and document one ${roleTitle} mini-project focused on ${keySkill}.`,
-            reason: 'This converts conversational interest into verifiable placement evidence.',
-            mappingStatus: 'UNMAPPED',
-            recommendedStageIds: [],
-          },
-        ],
-        diagnosticConclusions: [
-          {
-            id: 'dev_conclusion_1',
-            skillName: keySkill,
-            studentAnswerSnippet: devSession.messages.find((m) => m.actor === 'user')?.content || 'No answer captured.',
-            evidenceVerified: 'Initial answer captured in local dev session.',
-            evidenceStrength: 'Moderate',
-            score: 60,
-            confidenceScore: 65,
-            confidenceLevel: 'Medium',
-            gapSeverity: 'ORANGE',
-            gapDescription: 'Evidence is directionally relevant but needs stronger project proof.',
-            recommendedAction: `Prepare a role-specific artifact for ${roleTitle}.`,
-          },
-        ],
-        devMode: true,
-      });
-    }
-
     if (!UUID_RE.test(auditId)) {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
 
     const { supabase, user, isService } = await authenticateRequest(req);
     const session = await getAuditSession(supabase, auditId);
-    if (!isService && user && session.user_id !== user.id) {
+    if (!canAccessAuditSession({ sessionUserId: session.user_id, authenticatedUserId: user?.id || null, isService })) {
       return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
     }
     if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
@@ -2931,14 +2836,17 @@ app.post('/api/audit/:auditId/finalize', async (req, res) => {
 });
 
 app.post('/api/qalam/evaluate', async (req, res) => {
-  const supabase = await requireDatabase(res);
-  if (!supabase) return;
   try {
-    if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const auditId = requiredString(req.body?.auditId, 'auditId');
     if (!UUID_RE.test(auditId)) {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
+    const { supabase, user, isService } = await authenticateRequest(req);
+    const session = await getAuditSession(supabase, auditId);
+    if (!canAccessAuditSession({ sessionUserId: session.user_id, authenticatedUserId: user?.id || null, isService })) {
+      return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
+    }
+    if (!serverConfig.geminiConfigured && !serverConfig.openrouterConfigured) return apiError(res, 503, 'AI_UNAVAILABLE', 'Career audit AI is temporarily unavailable.');
     const report = await finalizeCareerAudit(supabase, auditId);
     return res.json({
       ...report,
@@ -2954,45 +2862,15 @@ app.post('/api/qalam/evaluate', async (req, res) => {
 app.get('/api/audit/:auditId/report', async (req, res) => {
   try {
     const auditId = requiredString(req.params.auditId, 'auditId');
-    const devSession = devAuditSessions.get(auditId);
-    if (devSession || auditId.startsWith('dev_audit_')) {
-      const targetRoleId = devSession?.target_role_id || 'dev_role_1';
-      const targetRole = await resolveGuidanceRole(targetRoleId, String(devSession?.context?.branch || 'Engineering'));
-      const roleTitle = targetRole.title || String(devSession?.context?.targetRole || 'Career Specialist');
-      const keySkill = targetRole.keySkills[0] || 'Domain Fundamentals';
-      return res.json({
-        auditId,
-        auditSessionId: auditId,
-        auditSessionRef: auditId,
-        targetRoleId,
-        targetRole: roleTitle,
-        overallScore: 58,
-        readinessStatus: 'Developing',
-        hiringBenchmark: 75,
-        distanceFromBenchmark: 17,
-        dimensionScores: {
-          careerClarity: 68,
-          technicalReadiness: 55,
-          projectReadiness: 50,
-          communication: 62,
-          placementReadiness: 54,
-          executionReadiness: 60,
-        },
-        diagnosisSummary: `Evaluation completed for ${roleTitle}.`,
-        whyRoleFits: [`${roleTitle} matches the selected career direction.`],
-        strengths: [{ skillId: 'dev_strength_1', skillName: keySkill, demonstratedScore: 60, evidence: 'Conversational evidence', confidenceScore: 65, whyItMatters: `${keySkill} is a core competency.` }],
-        gaps: [{ gapId: 'dev_gap_1', skillId: 'dev_skill_1', skillName: targetRole.keySkills[1] || 'Project Evidence', expectedScore: 75, demonstratedScore: 45, gap: 30, priorityWeight: 80, weightedGap: 24, priority: 'High', evidenceIds: [], signalIds: [], evidenceBasis: 'No project evidence.', recommendedAction: 'Add project.', mappingStatus: 'UNMAPPED', recommendedStageIds: [] }],
-        evidenceLedger: [],
-        devMode: true,
-      });
-    }
-
     if (!UUID_RE.test(auditId)) {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
 
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
+    const { supabase, user, isService } = await authenticateRequest(req);
+    const session = await getAuditSession(supabase, auditId);
+    if (!canAccessAuditSession({ sessionUserId: session.user_id, authenticatedUserId: user?.id || null, isService })) {
+      return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
+    }
 
     const report = await getPersistedReport(supabase, auditId);
     if (!report) return apiError(res, 404, 'REPORT_NOT_FOUND', 'Career audit report has not been finalized.');
@@ -3009,28 +2887,15 @@ app.get('/api/audit/:auditId/report', async (req, res) => {
 app.get('/api/audit/:auditId/roadmap-handoff', async (req, res) => {
   try {
     const auditId = requiredString(req.params.auditId, 'auditId');
-    const devSession = devAuditSessions.get(auditId);
-    if (devSession || auditId.startsWith('dev_audit_')) {
-      return res.json({
-        success: true,
-        auditId,
-        auditSessionId: auditId,
-        auditSessionRef: auditId,
-        studentId: devSession?.user_id || 'dev_user_1',
-        targetRoleId: devSession?.target_role_id || 'dev_role_1',
-        targetRole: String(devSession?.context?.targetRole || 'Career Specialist'),
-        status: 'HANDOFF_GENERATED',
-        gaps: [],
-        devMode: true,
-      });
-    }
-
     if (!UUID_RE.test(auditId)) {
       return apiError(res, 400, 'INVALID_AUDIT_SESSION_ID', 'auditId must be a valid UUID.');
     }
 
-    const supabase = await requireDatabase(res);
-    if (!supabase) return;
+    const { supabase, user, isService } = await authenticateRequest(req);
+    const session = await getAuditSession(supabase, auditId);
+    if (!canAccessAuditSession({ sessionUserId: session.user_id, authenticatedUserId: user?.id || null, isService })) {
+      return apiError(res, 403, 'FORBIDDEN', 'Authenticated user does not match the audit session owner.');
+    }
 
     const handoff = await getPersistedHandoff(supabase, auditId);
     if (!handoff) return apiError(res, 404, 'HANDOFF_NOT_FOUND', 'Career audit roadmap handoff has not been generated.');
@@ -3170,4 +3035,3 @@ startServer().catch((error) => {
   console.error('career_voice_startup_failed', { message: error instanceof Error ? error.message : String(error) });
   process.exitCode = 1;
 });
-

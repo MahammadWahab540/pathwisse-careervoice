@@ -5,6 +5,7 @@ import {
   AuditFinalizationError,
   finalizeCareerAudit,
   persistFinalClassification,
+  pruneStaleAuditRecommendations,
 } from '../src/server/finalizeAudit';
 
 const classification = {
@@ -147,6 +148,81 @@ test('explanation provider outage is surfaced as 503 before score persistence', 
   assert.deepEqual(writes, ['audit_sessions']);
 });
 
+test('duplicate competency classifications are rejected before persistence', async () => {
+  const { supabase, writes } = createPrePersistenceSupabase();
+  const duplicateClassification = {
+    ...classification,
+    competencySignals: [classification.competencySignals[0], classification.competencySignals[0]],
+  };
+
+  await assert.rejects(
+    finalizeCareerAudit(supabase, 'audit-1', {
+      generateStructuredJson: async (options: any) => options.validate(duplicateClassification),
+    }),
+    (error: unknown) =>
+      error instanceof AuditFinalizationError &&
+      error.code === 'AI_RESPONSE_INVALID' &&
+      error.message.includes('Duplicate competency skillId skill-1')
+  );
+
+  assert.deepEqual(writes, ['audit_sessions']);
+});
+
+test('duplicate required dimension classifications are rejected before persistence', async () => {
+  const { supabase, writes } = createPrePersistenceSupabase();
+  const duplicateClassification = {
+    ...classification,
+    dimensionSignals: [...classification.dimensionSignals, classification.dimensionSignals[0]],
+  };
+
+  await assert.rejects(
+    finalizeCareerAudit(supabase, 'audit-1', {
+      generateStructuredJson: async (options: any) => options.validate(duplicateClassification),
+    }),
+    (error: unknown) =>
+      error instanceof AuditFinalizationError &&
+      error.code === 'AI_RESPONSE_INVALID' &&
+      error.message.includes('Duplicate dimension careerClarity')
+  );
+
+  assert.deepEqual(writes, ['audit_sessions']);
+});
+
+test('duplicate skill explanations are rejected before persistence', async () => {
+  const { supabase, writes } = createPrePersistenceSupabase();
+  let generationCall = 0;
+  const explanation = {
+    diagnosisSummary: 'API design evidence is moderate.',
+    whyRoleFits: ['Relevant API delivery evidence.'],
+    skillExplanations: [{
+      skillId: 'skill-1',
+      whyItMatters: 'API design is required for the role.',
+      recommendedAction: 'Build a versioned API.',
+      reason: 'Current evidence is moderate.',
+    }],
+  };
+
+  await assert.rejects(
+    finalizeCareerAudit(supabase, 'audit-1', {
+      generateStructuredJson: async (options: any) => {
+        generationCall += 1;
+        if (generationCall === 1) return options.validate(classification);
+        return options.validate({
+          ...explanation,
+          skillExplanations: [explanation.skillExplanations[0], explanation.skillExplanations[0]],
+        });
+      },
+    }),
+    (error: unknown) =>
+      error instanceof AuditFinalizationError &&
+      error.code === 'AI_RESPONSE_INVALID' &&
+      error.message.includes('Duplicate explanation skillId skill-1')
+  );
+
+  assert.equal(generationCall, 2);
+  assert.deepEqual(writes, ['audit_sessions']);
+});
+
 test('retry updates an existing final signal before score and gap upserts', async () => {
   let updatedPayload: Record<string, unknown> | null = null;
   let updatedId: string | null = null;
@@ -207,4 +283,135 @@ test('retry updates an existing final signal before score and gap upserts', asyn
   assert.equal(updatedPayload?.evidence_id, 'evidence-2');
   assert.equal(updatedPayload?.confidence_score, 92);
   assert.equal(updatedPayload?.extracted_level, 'Advanced');
+});
+
+test('concurrent final-signal insert conflict resolves to the winning row and updates it', async () => {
+  let lookupCount = 0;
+  let updatedId: string | null = null;
+  let updatedPayload: Record<string, unknown> | null = null;
+  const supabase = {
+    from() {
+      let operation: 'lookup' | 'insert' | 'update' = 'lookup';
+      const query: Record<string, any> = {
+        select: () => query,
+        eq: (field: string, value: string) => {
+          if (operation === 'update' && field === 'id') updatedId = value;
+          return query;
+        },
+        maybeSingle: () => {
+          lookupCount += 1;
+          return Promise.resolve({
+            data: lookupCount === 1 ? null : { id: 'signal-concurrent-winner' },
+            error: null,
+          });
+        },
+        insert: () => {
+          operation = 'insert';
+          return query;
+        },
+        update: (payload: Record<string, unknown>) => {
+          operation = 'update';
+          updatedPayload = payload;
+          return query;
+        },
+        single: () => Promise.resolve(
+          operation === 'insert'
+            ? { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } }
+            : { data: null, error: null }
+        ),
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+          Promise.resolve({ data: null, error: null }).then(resolve, reject),
+      };
+      return query;
+    },
+  };
+
+  const signalId = await persistFinalClassification(supabase as any, {
+    auditId: 'audit-1',
+    studentId: 'user-1',
+    roleId: 'role-1',
+    competency: {
+      skillId: 'skill-1', skillSlug: 'api_design', skillName: 'API Design', category: 'Technical',
+      expectedScore: 70, importanceWeight: 1, dependencyWeight: 1, employabilityWeight: 1,
+      description: 'Design reliable APIs',
+    },
+    classification: {
+      skillId: 'skill-1', skillName: 'API Design', evidenceId: 'evidence-2', extractedLevel: 'Advanced',
+      confidenceScore: 92, evidenceStrength: 'Strong', contradictory: false,
+    },
+    evidence: {
+      id: 'evidence-2', evidence_type: 'text', raw_text: 'Updated evidence', source: 'typed_probe',
+    },
+  });
+
+  assert.equal(signalId, 'signal-concurrent-winner');
+  assert.equal(lookupCount, 2);
+  assert.equal(updatedId, 'signal-concurrent-winner');
+  assert.equal(updatedPayload?.evidence_id, 'evidence-2');
+});
+
+test('successful finalization pruning removes only recommendations outside the current gap set', async () => {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const supabase = {
+    from(table: string) {
+      calls.push(['from', table]);
+      const result = Promise.resolve({ data: null, error: null });
+      const query: Record<string, any> = {
+        delete: () => {
+          calls.push(['delete']);
+          return query;
+        },
+        eq: (field: string, value: string) => {
+          calls.push(['eq', field, value]);
+          return query;
+        },
+        not: (field: string, operator: string, value: string) => {
+          calls.push(['not', field, operator, value]);
+          return query;
+        },
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+          result.then(resolve, reject),
+      };
+      return query;
+    },
+  };
+
+  await pruneStaleAuditRecommendations(supabase as any, 'audit-1', ['gap-current-1', 'gap-current-2']);
+
+  assert.deepEqual(calls, [
+    ['from', 'audit_recommendations'],
+    ['delete'],
+    ['eq', 'session_id', 'audit-1'],
+    ['not', 'gap_id', 'in', '(gap-current-1,gap-current-2)'],
+  ]);
+});
+
+test('successful finalization pruning removes every prior recommendation when no gaps remain', async () => {
+  const calls: string[] = [];
+  const supabase = {
+    from() {
+      const result = Promise.resolve({ data: null, error: null });
+      const query: Record<string, any> = {
+        delete: () => {
+          calls.push('delete');
+          return query;
+        },
+        eq: () => {
+          calls.push('eq');
+          return query;
+        },
+        not: () => {
+          calls.push('not');
+          return query;
+        },
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+          result.then(resolve, reject),
+      };
+      return query;
+    },
+  };
+
+  await pruneStaleAuditRecommendations(supabase as any, 'audit-1', []);
+
+  assert.deepEqual(calls, ['delete', 'eq']);
 });

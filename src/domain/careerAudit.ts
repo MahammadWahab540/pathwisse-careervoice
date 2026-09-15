@@ -101,40 +101,82 @@ export interface AuditReportStrength {
   skillId: string;
   skillName: string;
   demonstratedScore: number;
-  evidenceIds: string[];
-  signalIds: string[];
+  evidence: string;
+  confidenceScore: number;
+  whyItMatters: string;
 }
 
 export interface AuditReportGap {
+  gapId: string;
   skillId: string;
   skillName: string;
   expectedScore: number;
   demonstratedScore: number;
   gap: number;
+  priorityWeight: number;
+  weightedGap: number;
   priority: GapPriority;
   evidenceIds: string[];
   signalIds: string[];
+  evidenceBasis: string;
+  recommendedAction: string;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  recommendedPathwisseSkillId?: string;
+  recommendedStageIds: string[];
 }
 
 export interface AuditRecommendation {
-  skillId: string;
-  action: string;
+  recommendationId: string;
+  gapId: string;
+  rank: number;
+  recommendedAction: string;
   reason: string;
   mappingStatus: 'MAPPED' | 'UNMAPPED';
-  pathwisseSkillId?: string | null;
-  recommendedStageIds?: string[];
+  pathwisseSkillId?: string;
+  recommendedStageIds: string[];
 }
 
+export interface AuditEvidenceLedgerItem {
+  skillId: string;
+  skillName: string;
+  observedEvidence: string[];
+  missingEvidence: string[];
+  weakEvidence: string[];
+  contradictoryEvidence: string[];
+}
+
+export interface AuditDiagnosticConclusion {
+  id: string;
+  skillName: string;
+  studentAnswerSnippet: string;
+  evidenceVerified: string;
+  evidenceStrength: EvidenceStrength;
+  score: number;
+  confidenceScore: number;
+  confidenceLevel: 'High' | 'Medium' | 'Low';
+  gapSeverity: 'RED' | 'ORANGE' | 'GREEN';
+  gapDescription: string;
+  recommendedAction: string;
+}
+
+/** The exact payload persisted in audit_reports.model_metadata.reportPayload and returned by the finalize API. */
 export interface AuditReportContract {
+  success: true;
   auditId: string;
-  roleId: string;
-  readinessScore: number;
+  targetRoleId: string;
+  targetRole: string;
+  overallScore: number;
   readinessStatus: ReadinessStatus;
-  benchmarkScore: number;
+  hiringBenchmark: number;
   distanceFromBenchmark: number;
+  dimensionScores: DimensionScores;
+  diagnosisSummary: string;
+  whyRoleFits: string[];
   strengths: AuditReportStrength[];
   gaps: AuditReportGap[];
-  recommendations: AuditRecommendation[];
+  evidenceLedger: AuditEvidenceLedgerItem[];
+  priorityRecommendations: AuditRecommendation[];
+  diagnosticConclusions: AuditDiagnosticConclusion[];
 }
 
 export interface RoadmapHandoffPriorityGap {

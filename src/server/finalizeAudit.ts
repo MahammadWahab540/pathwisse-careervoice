@@ -187,11 +187,14 @@ function validateClassification(
   }
 
   const competencyById = new Map(competencies.map((item) => [item.skillId, item]));
+  const seenCompetencyIds = new Set<string>();
   const competencySignals = value.competencySignals.map((entry, index): ClassificationItem => {
     if (!isRecord(entry)) throw new Error(`competencySignals[${index}] is invalid`);
     const skillId = readString(entry.skillId, `competencySignals[${index}].skillId`);
     const competency = competencyById.get(skillId);
     if (!competency) throw new Error(`Unknown competency skillId ${skillId}`);
+    if (seenCompetencyIds.has(skillId)) throw new Error(`Duplicate competency skillId ${skillId}`);
+    seenCompetencyIds.add(skillId);
     const evidenceId = readString(entry.evidenceId, `competencySignals[${index}].evidenceId`);
     if (!evidenceIds.has(evidenceId)) throw new Error(`Unknown evidenceId ${evidenceId}`);
     return {
@@ -205,9 +208,8 @@ function validateClassification(
     };
   });
 
-  const seenSkillIds = new Set(competencySignals.map((item) => item.skillId));
   for (const competency of competencies) {
-    if (!seenSkillIds.has(competency.skillId)) {
+    if (!seenCompetencyIds.has(competency.skillId)) {
       throw new Error(`Gemini did not classify required competency ${competency.skillId}`);
     }
   }
@@ -219,10 +221,13 @@ function validateClassification(
     'placementReadiness',
     'executionReadiness',
   ]);
+  const seenDimensions = new Set<string>();
   const dimensionSignals = value.dimensionSignals.map((entry, index): DimensionClassification => {
     if (!isRecord(entry)) throw new Error(`dimensionSignals[${index}] is invalid`);
     const dimension = readString(entry.dimension, `dimensionSignals[${index}].dimension`);
     if (!allowedDimensions.has(dimension)) throw new Error(`Unknown dimension ${dimension}`);
+    if (seenDimensions.has(dimension)) throw new Error(`Duplicate dimension ${dimension}`);
+    seenDimensions.add(dimension);
     const evidenceId = readString(entry.evidenceId, `dimensionSignals[${index}].evidenceId`);
     if (!evidenceIds.has(evidenceId)) throw new Error(`Unknown dimension evidenceId ${evidenceId}`);
     return {
@@ -235,7 +240,7 @@ function validateClassification(
   });
 
   for (const dimension of allowedDimensions) {
-    if (!dimensionSignals.some((item) => item.dimension === dimension)) {
+    if (!seenDimensions.has(dimension)) {
       throw new Error(`Gemini did not classify required dimension ${dimension}`);
     }
   }
@@ -249,10 +254,13 @@ function validateExplanation(value: unknown, skillIds: Set<string>): Explanation
   }
   const diagnosisSummary = readString(value.diagnosisSummary, 'diagnosisSummary');
   const whyRoleFits = value.whyRoleFits.map((item, index) => readString(item, `whyRoleFits[${index}]`));
+  const seenSkillIds = new Set<string>();
   const skillExplanations = value.skillExplanations.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`skillExplanations[${index}] is invalid`);
     const skillId = readString(entry.skillId, `skillExplanations[${index}].skillId`);
     if (!skillIds.has(skillId)) throw new Error(`Unknown explanation skillId ${skillId}`);
+    if (seenSkillIds.has(skillId)) throw new Error(`Duplicate explanation skillId ${skillId}`);
+    seenSkillIds.add(skillId);
     return {
       skillId,
       whyItMatters: readString(entry.whyItMatters, `skillExplanations[${index}].whyItMatters`),
@@ -260,9 +268,8 @@ function validateExplanation(value: unknown, skillIds: Set<string>): Explanation
       reason: readString(entry.reason, `skillExplanations[${index}].reason`),
     };
   });
-  const seen = new Set(skillExplanations.map((item) => item.skillId));
   for (const skillId of skillIds) {
-    if (!seen.has(skillId)) throw new Error(`Gemini explanation missing skillId ${skillId}`);
+    if (!seenSkillIds.has(skillId)) throw new Error(`Gemini explanation missing skillId ${skillId}`);
   }
   return { diagnosisSummary, whyRoleFits, skillExplanations };
 }
@@ -433,9 +440,48 @@ export async function persistFinalClassification(
     .select('id')
     .single();
   if (inserted.error || !inserted.data) {
+    if (inserted.error?.code === '23505') {
+      const concurrent = await supabase
+        .from('audit_skill_signals')
+        .select('id')
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle();
+      if (concurrent.error) {
+        throw new PersistenceError('final_signal_conflict_lookup', concurrent.error.message);
+      }
+      if (concurrent.data?.id) {
+        const concurrentId = concurrent.data.id as string;
+        const updated = await supabase
+          .from('audit_skill_signals')
+          .update(signalPayload)
+          .eq('id', concurrentId);
+        if (updated.error) throw new PersistenceError('final_signal_conflict_update', updated.error.message);
+        return concurrentId;
+      }
+    }
     throw new PersistenceError('final_signal_insert', inserted.error?.message || 'Signal insert failed.');
   }
   return inserted.data.id as string;
+}
+
+export async function pruneStaleAuditRecommendations(
+  supabase: SupabaseClient,
+  auditId: string,
+  currentGapIds: string[]
+): Promise<void> {
+  let deletion = supabase
+    .from('audit_recommendations')
+    .delete()
+    .eq('session_id', auditId);
+
+  if (currentGapIds.length > 0) {
+    deletion = deletion.not('gap_id', 'in', `(${currentGapIds.join(',')})`);
+  }
+
+  const result = await deletion;
+  if (result.error) {
+    throw new PersistenceError('audit_recommendation_prune', result.error.message);
+  }
 }
 
 async function upsertScoreAndGap(
@@ -798,6 +844,12 @@ export async function finalizeCareerAudit(
     });
     rank += 1;
   }
+
+  await pruneStaleAuditRecommendations(
+    supabase,
+    auditId,
+    recommendationRows.map((recommendation) => recommendation.gapId)
+  );
 
   const diagnosticConclusions: CareerAuditReportResponse['diagnosticConclusions'] = sortedRecords.map((record) => {
     const explanationItem = explanationBySkill.get(record.competency.skillId)!;
