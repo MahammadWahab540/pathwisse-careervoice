@@ -96,6 +96,55 @@ export const READINESS_THRESHOLDS = {
   developing: 45,
 } as const;
 
+
+export interface AuditReportStrength {
+  skillId: string;
+  skillName: string;
+  demonstratedScore: number;
+  evidenceIds: string[];
+  signalIds: string[];
+}
+
+export interface AuditReportGap {
+  skillId: string;
+  skillName: string;
+  expectedScore: number;
+  demonstratedScore: number;
+  gap: number;
+  priority: GapPriority;
+  evidenceIds: string[];
+  signalIds: string[];
+}
+
+export interface AuditRecommendation {
+  skillId: string;
+  action: string;
+  reason: string;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  pathwisseSkillId?: string | null;
+  recommendedStageIds?: string[];
+}
+
+export interface AuditReportContract {
+  auditId: string;
+  roleId: string;
+  readinessScore: number;
+  readinessStatus: ReadinessStatus;
+  benchmarkScore: number;
+  distanceFromBenchmark: number;
+  strengths: AuditReportStrength[];
+  gaps: AuditReportGap[];
+  recommendations: AuditRecommendation[];
+}
+
+export interface RoadmapHandoffContract {
+  contract: 'career-audit-roadmap-contract:v1';
+  auditId: string;
+  roleId: string;
+  readinessStatus: ReadinessStatus;
+  recommendations: AuditRecommendation[];
+}
+
 export interface RoleFitProfile {
   careerIntent: string;
   branch: string;
@@ -419,7 +468,7 @@ export function calculateSkillGap(
   };
 }
 
-export function calculateOverallReadiness(
+export function calculateReadiness(
   dimensions: DimensionScores,
   weights: ReadinessWeights = DEFAULT_READINESS_WEIGHTS
 ): number {
@@ -434,6 +483,8 @@ export function calculateOverallReadiness(
 
   return Math.round(weighted / totalWeight);
 }
+
+export const calculateOverallReadiness = calculateReadiness;
 
 function tokenize(value: string): Set<string> {
   return new Set(
@@ -522,3 +573,4 @@ export function calculateRoleFit(profile: RoleFitProfile, role: RoleFitRole): Ro
 
   return { roleId: role.roleId, matchScore, fitBand, fitReasons };
 }
+

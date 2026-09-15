@@ -493,66 +493,6 @@ export async function getPersistedHandoff(
   return payload && isRecord(payload) ? (payload as unknown as CareerAuditRoadmapHandoffV1) : null;
 }
 
-function fallbackClassification(
-  competencies: CompetencyRecord[],
-  evidenceRows: EvidenceRow[]
-): ClassificationPayload {
-  const firstEvidenceId = evidenceRows[0]?.id || '';
-  const competencySignals: ClassificationItem[] = competencies.map((competency) => {
-    const keywords = competency.skillName.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-    const matchedEvidence = evidenceRows.find((e) => {
-      const text = (e.raw_text || '').toLowerCase();
-      return keywords.some((k) => text.includes(k));
-    }) || evidenceRows[0];
-
-    const hasMatch = keywords.some((k) => (matchedEvidence?.raw_text || '').toLowerCase().includes(k));
-    const evidenceLength = (matchedEvidence?.raw_text || '').length;
-
-    return {
-      skillId: competency.skillId,
-      skillName: competency.skillName,
-      evidenceId: matchedEvidence?.id || firstEvidenceId,
-      evidenceStrength: (hasMatch ? (evidenceLength > 80 ? 'Moderate' : 'Weak') : 'None') as EvidenceStrength,
-      extractedLevel: hasMatch ? (evidenceLength > 80 ? 'Intermediate' : 'Beginner') : 'Novice',
-      confidenceScore: hasMatch ? (evidenceLength > 80 ? 65 : 45) : 30,
-      contradictory: false,
-    };
-  });
-
-  const dimensionSignals: DimensionClassification[] = [
-    { dimension: 'careerClarity', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 65 },
-    { dimension: 'projectReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Weak', extractedLevel: 'Beginner', confidenceScore: 50 },
-    { dimension: 'communication', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 60 },
-    { dimension: 'placementReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Weak', extractedLevel: 'Beginner', confidenceScore: 45 },
-    { dimension: 'executionReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 55 },
-  ];
-
-  return { competencySignals, dimensionSignals };
-}
-
-function fallbackExplanation(
-  roleTitle: string,
-  competencies: CompetencyRecord[],
-  overallScore: number,
-  readinessStatus: string,
-  hiringBenchmark: number
-): ExplanationPayload {
-  return {
-    diagnosisSummary: `Career audit completed for ${roleTitle}. Overall readiness score is ${overallScore}/100 against hiring benchmark ${hiringBenchmark}. Status is ${readinessStatus}.`,
-    whyRoleFits: [
-      `${roleTitle} aligns with your indicated technical domain and career direction.`,
-      'Demonstrated foundational awareness in core track competencies.',
-      'Targeted portfolio proof will accelerate your placement readiness.',
-    ],
-    skillExplanations: competencies.map((c) => ({
-      skillId: c.skillId,
-      whyItMatters: `${c.skillName} is a high-impact benchmark competency expected for ${roleTitle}.`,
-      recommendedAction: `Build a concrete portfolio artifact or case study demonstrating ${c.skillName}.`,
-      reason: `${c.skillName} demonstrates practical technical capability for hiring teams.`,
-    })),
-  };
-}
-
 export async function finalizeCareerAudit(
   supabase: SupabaseClient,
   auditId: string
@@ -606,8 +546,11 @@ export async function finalizeCareerAudit(
       validate: (value) => validateClassification(value, competencies, evidenceIds),
     });
   } catch (err) {
-    console.warn('ai_classification_fallback_triggered', err instanceof Error ? err.message : err);
-    classification = fallbackClassification(competencies, usableEvidence);
+    throw new AuditFinalizationError(
+      'AI_RESPONSE_INVALID',
+      err instanceof Error ? `AI classification response is invalid: ${err.message}` : 'AI classification response is invalid.',
+      502
+    );
   }
 
   const evidenceById = new Map(usableEvidence.map((item) => [item.id, item]));
@@ -711,8 +654,11 @@ export async function finalizeCareerAudit(
       validate: (value) => validateExplanation(value, new Set(competencies.map((item) => item.skillId))),
     });
   } catch (err) {
-    console.warn('ai_explanation_fallback_triggered', err instanceof Error ? err.message : err);
-    explanation = fallbackExplanation(role.title, competencies, overallScore, readinessStatus, hiringBenchmark);
+    throw new AuditFinalizationError(
+      'AI_RESPONSE_INVALID',
+      err instanceof Error ? `AI explanation response is invalid: ${err.message}` : 'AI explanation response is invalid.',
+      502
+    );
   }
 
   const explanationBySkill = new Map(explanation.skillExplanations.map((item) => [item.skillId, item]));
@@ -916,3 +862,4 @@ export async function finalizeCareerAudit(
 
   return report;
 }
+

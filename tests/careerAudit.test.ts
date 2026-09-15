@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  type AuditReportContract,
+  type RoadmapHandoffContract,
+  calculateReadiness,
   calculateRoleFit,
   calculateSkillGap,
   calculateSkillScore,
@@ -86,6 +89,67 @@ test('canonical signal parser rejects the old evidenceLevel contract', () => {
       source: 'voice_probe',
     })
   );
+});
+
+
+test('calculateReadiness uses shared weighted readiness math', () => {
+  const score = calculateReadiness({
+    careerClarity: 100,
+    technicalReadiness: 80,
+    projectReadiness: 70,
+    communication: 60,
+    placementReadiness: 50,
+    executionReadiness: 40,
+  });
+
+  assert.equal(score, 68);
+  assert.equal(readinessStatusForScore(score), 'Developing');
+});
+
+test('report and roadmap handoff contracts preserve traceability fields', () => {
+  const report: AuditReportContract = {
+    auditId: '57f2df69-32c4-4204-8311-3e369c9261b9',
+    roleId: 'frontend-engineer',
+    readinessScore: 82,
+    readinessStatus: 'Nearly Ready',
+    benchmarkScore: 85,
+    distanceFromBenchmark: 3,
+    strengths: [{
+      skillId: 'react',
+      skillName: 'React',
+      demonstratedScore: 88,
+      evidenceIds: ['evidence-1'],
+      signalIds: ['signal-1'],
+    }],
+    gaps: [{
+      skillId: 'testing',
+      skillName: 'Testing',
+      expectedScore: 80,
+      demonstratedScore: 50,
+      gap: 30,
+      priority: 'High',
+      evidenceIds: ['evidence-2'],
+      signalIds: ['signal-2'],
+    }],
+    recommendations: [{
+      skillId: 'testing',
+      action: 'Build a tested API feature',
+      reason: 'Gap is traceable to the benchmark and persisted evidence.',
+      mappingStatus: 'UNMAPPED',
+    }],
+  };
+
+  const handoff: RoadmapHandoffContract = {
+    contract: 'career-audit-roadmap-contract:v1',
+    auditId: report.auditId,
+    roleId: report.roleId,
+    readinessStatus: report.readinessStatus,
+    recommendations: report.recommendations,
+  };
+
+  assert.equal(report.gaps[0].evidenceIds[0], 'evidence-2');
+  assert.equal(handoff.contract, 'career-audit-roadmap-contract:v1');
+  assert.equal(handoff.recommendations[0].mappingStatus, 'UNMAPPED');
 });
 
 test('role fit changes with student evidence instead of card position', () => {
@@ -274,3 +338,4 @@ test('audit transition rejects stale state and never regresses to a prior stage'
   assert.equal(result.action, 'COMPLETE');
   assert.equal(result.nextStage, 'execution_stage');
 });
+

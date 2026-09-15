@@ -2236,38 +2236,12 @@ app.get('/api/catalog/competency/:roleId', async (req, res) => {
   const roleId = requiredString(req.params.roleId, 'roleId');
   const supabase = getSupabase();
   if (!supabase) {
-    const seedModel = SEED_ROLE_COMPETENCIES.find((c) => c.role_id === roleId) || SEED_ROLE_COMPETENCIES[0];
-    return res.json({
-      roleId: seedModel.role_id,
-      minimumReadinessBenchmark: Number(seedModel.minimum_readiness_benchmark),
-      evaluationCriteria: {
-        clarityWeight: Number(seedModel.clarity_weight),
-        technicalWeight: Number(seedModel.technical_weight),
-        projectWeight: Number(seedModel.project_weight),
-        communicationWeight: Number(seedModel.communication_weight),
-        placementWeight: 10,
-        executionWeight: Number(seedModel.execution_weight),
-      },
-      coreCompetencies: seedModel.core_competencies,
-    });
+    return apiError(res, 503, 'DATABASE_UNAVAILABLE', 'Supabase is required to load competency benchmarks.');
   }
   try {
     const model = await loadCompetencyModel(supabase, roleId);
     if (!model || !Array.isArray(model.core_competencies) || model.core_competencies.length === 0) {
-      const seedModel = SEED_ROLE_COMPETENCIES.find((c) => c.role_id === roleId) || SEED_ROLE_COMPETENCIES[0];
-      return res.json({
-        roleId: seedModel.role_id,
-        minimumReadinessBenchmark: Number(seedModel.minimum_readiness_benchmark),
-        evaluationCriteria: {
-          clarityWeight: Number(seedModel.clarity_weight),
-          technicalWeight: Number(seedModel.technical_weight),
-          projectWeight: Number(seedModel.project_weight),
-          communicationWeight: Number(seedModel.communication_weight),
-          placementWeight: 10,
-          executionWeight: Number(seedModel.execution_weight),
-        },
-        coreCompetencies: seedModel.core_competencies,
-      });
+      return apiError(res, 404, 'COMPETENCY_MODEL_MISSING', 'No competency model is configured for this role.');
     }
     return res.json({
       roleId: model.role_id,
@@ -2283,20 +2257,7 @@ app.get('/api/catalog/competency/:roleId', async (req, res) => {
       coreCompetencies: model.core_competencies,
     });
   } catch (error) {
-    const seedModel = SEED_ROLE_COMPETENCIES.find((c) => c.role_id === roleId) || SEED_ROLE_COMPETENCIES[0];
-    return res.json({
-      roleId: seedModel.role_id,
-      minimumReadinessBenchmark: Number(seedModel.minimum_readiness_benchmark),
-      evaluationCriteria: {
-        clarityWeight: Number(seedModel.clarity_weight),
-        technicalWeight: Number(seedModel.technical_weight),
-        projectWeight: Number(seedModel.project_weight),
-        communicationWeight: Number(seedModel.communication_weight),
-        placementWeight: 10,
-        executionWeight: Number(seedModel.execution_weight),
-      },
-      coreCompetencies: seedModel.core_competencies,
-    });
+    return apiError(res, 500, 'COMPETENCY_MODEL_READ_FAILED', 'Competency model could not be loaded.');
   }
 });
 
@@ -3209,3 +3170,4 @@ startServer().catch((error) => {
   console.error('career_voice_startup_failed', { message: error instanceof Error ? error.message : String(error) });
   process.exitCode = 1;
 });
+
