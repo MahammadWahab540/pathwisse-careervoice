@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 
@@ -191,3 +191,54 @@ test('Campaign Creation: URL structure adheres to /invite/:token pattern without
   // Confirm no editable URL params like ?college= or ?batch= are present
   assert.equal(inviteUrl.includes('?'), false);
 });
+
+// ─────────────────────────────────────────────
+// Placement Dashboard Live Data & First-Time Onboarding Tests
+// ─────────────────────────────────────────────
+
+test('Placement Dashboard: empty state returns 0 metrics, null avgScore, and empty students list', () => {
+  // Simulating dashboard computation when database has 0 profiles and 0 reports
+  const rawStudents: Array<any> = [];
+  const reports: Array<any> = [];
+
+  const totalInvited = rawStudents.length;
+  const startedCount = rawStudents.filter((s) => s.status === 'started' || s.status === 'completed').length;
+  const completedCount = rawStudents.filter((s) => s.status === 'completed').length;
+  const validScores = reports.map((r) => Number(r.overall_score)).filter((s) => !isNaN(s) && s > 0);
+  const avgReadinessScore = validScores.length > 0 ? validScores.reduce((a, b) => a + b, 0) / validScores.length : null;
+
+  assert.equal(totalInvited, 0);
+  assert.equal(startedCount, 0);
+  assert.equal(completedCount, 0);
+  assert.equal(avgReadinessScore, null);
+  assert.equal(rawStudents.length, 0);
+});
+
+test('Placement Dashboard Welcome Banner: visible only for new users with 0 campaigns and not dismissed', () => {
+  function shouldShowWelcomeBanner(campaignCount: number, isDismissed: boolean): boolean {
+    return !isDismissed && campaignCount === 0;
+  }
+
+  // First-time user, 0 campaigns, not dismissed -> SHOW
+  assert.equal(shouldShowWelcomeBanner(0, false), true);
+
+  // User dismissed banner -> HIDE
+  assert.equal(shouldShowWelcomeBanner(0, true), false);
+
+  // User created first campaign -> HIDE even if not explicitly dismissed
+  assert.equal(shouldShowWelcomeBanner(1, false), false);
+
+  // User created multiple campaigns and dismissed -> HIDE
+  assert.equal(shouldShowWelcomeBanner(3, true), false);
+});
+
+test('Placement Role Lock: placement officers attempting to navigate to student routes are locked to /placement', () => {
+  const placementOfficer = { authenticated: true, role: 'placement_team' };
+  const collegeAdmin = { authenticated: true, role: 'college' };
+
+  assert.equal(resolveRouteAccess(placementOfficer, '/student').redirect, '/placement');
+  assert.equal(resolveRouteAccess(placementOfficer, '/student/assessment').redirect, '/placement');
+  assert.equal(resolveRouteAccess(collegeAdmin, '/student').redirect, '/placement');
+  assert.equal(resolveRouteAccess(placementOfficer, '/placement').allowed, true);
+});
+

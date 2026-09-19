@@ -1,4 +1,4 @@
-﻿import {
+import {
   SEED_CAREER_STREAMS,
   SEED_CAREER_ROLES,
   SEED_ROLE_COMPETENCIES,
@@ -468,96 +468,237 @@ async function handleApi(request: Request, url: URL, env: Env, _ctx: ExecutionCo
 
   // 13. College Dashboard Overview
   if (path === '/api/college/dashboard' && method === 'GET') {
-    const collegeId = url.searchParams.get('collegeId') || 'bits_h';
+    const collegeId = url.searchParams.get('collegeId') || 'custom_college';
     const batchFilter = url.searchParams.get('batch') || '2026';
+    const deptFilter = url.searchParams.get('department');
 
     try {
-      const [profsRes, sessRes, reportsRes, rolesRes] = await Promise.all([
-        fetch(`${supabaseUrl}/rest/v1/profiles?select=*&limit=100`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
-        fetch(`${supabaseUrl}/rest/v1/audit_sessions?select=*&limit=100`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
-        fetch(`${supabaseUrl}/rest/v1/audit_reports?select=*&limit=100`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
+      const [profsRes, sessRes, reportsRes, rolesRes, colRes] = await Promise.all([
+        fetch(`${supabaseUrl}/rest/v1/profiles?select=*&limit=200`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
+        fetch(`${supabaseUrl}/rest/v1/audit_sessions?select=*&limit=200`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
+        fetch(`${supabaseUrl}/rest/v1/audit_reports?select=*&limit=200`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
         fetch(`${supabaseUrl}/rest/v1/career_roles?select=id,title,demand_level&limit=50`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
+        fetch(`${supabaseUrl}/rest/v1/colleges?select=id,slug,name&limit=100`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }),
       ]);
 
       const profs = (profsRes.ok ? await profsRes.json() : []) as Array<Record<string, unknown>>;
+      const sessions = (sessRes.ok ? await sessRes.json() : []) as Array<Record<string, unknown>>;
       const reports = (reportsRes.ok ? await reportsRes.json() : []) as Array<Record<string, unknown>>;
       const roles = (rolesRes.ok ? await rolesRes.json() : []) as Array<Record<string, unknown>>;
+      const colleges = (colRes.ok ? await colRes.json() : []) as Array<Record<string, unknown>>;
 
-      const totalStudents = profs.length;
-      const completedCount = reports.length;
-      const startedCount = Math.max(completedCount, totalStudents > 0 ? Math.floor(totalStudents * 0.7) : 0);
+      // Match college name
+      let collegeName = 'Placement Portal';
+      const matchedCol = colleges.find(
+        (c) => c.slug === collegeId || c.id === collegeId || String(c.name || '').toLowerCase().includes(collegeId.toLowerCase())
+      );
+      if (matchedCol?.name) {
+        collegeName = String(matchedCol.name);
+      }
 
-      const scores = reports.map((r) => Number(r.overall_score)).filter((s) => !isNaN(s) && s > 0);
-      const avgScore = scores.length > 0 ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 64.5;
+      // Filter profs that are students (or not placement officers)
+      const studentProfs = profs.filter((p) => p.account_role !== 'placement_team' && p.account_role !== 'college');
 
-      const topRoles = roles.slice(0, 4).map((r, i) => ({
-        roleTitle: r.title as string,
-        studentCount: Math.max(1, Math.floor((totalStudents || 10) * (0.4 - i * 0.08))),
-        percentage: Math.max(10, 40 - i * 8),
-        demandLevel: (r.demand_level as string) || 'High',
-      }));
+      // Map sessions and reports by user_id
+      const sessionUserMap = new Map(sessions.map((s) => [String(s.user_id), s]));
+      const reportSessionMap = new Map(reports.map((r) => [String(r.session_id), r]));
+      const reportUserMap = new Map(reports.map((r) => [String(r.user_id), r]));
+      const roleMap = new Map(roles.map((r) => [String(r.id), r]));
 
-      const criticalGaps = [
-        { skillName: 'System Design & Code Quality', gapAverage: 24, affectedCount: Math.max(2, Math.floor(totalStudents * 0.45)), priority: 'High', recommendedAction: 'Targeted lab sprint on System Design prior to campus drives.' },
-        { skillName: 'Production Debugging & Telemetry', gapAverage: 19, affectedCount: Math.max(1, Math.floor(totalStudents * 0.35)), priority: 'Medium', recommendedAction: 'Add hands-on observability & logging workshops.' },
-      ];
+      const students = studentProfs.map((p, idx) => {
+        const userId = String(p.user_id || p.id);
+        const session = sessionUserMap.get(userId);
+        const report = reportUserMap.get(userId) || (session ? reportSessionMap.get(String(session.id)) : null);
+
+        let status: 'completed' | 'started' | 'invited' = 'invited';
+        let readinessScore: number | null = null;
+        let completedAt: string | null = null;
+
+        if (report) {
+          status = 'completed';
+          readinessScore = report.overall_score !== null && report.overall_score !== undefined ? Number(report.overall_score) : null;
+          completedAt = typeof report.created_at === 'string' ? report.created_at : null;
+        } else if (session && (session.status === 'in_progress' || session.status === 'processing' || session.status === 'started')) {
+          status = 'started';
+        }
+
+        const dept = (p.department as string) || (p.branch as string) || 'Engineering';
+        const targetRoleObj = p.target_role_id ? roleMap.get(String(p.target_role_id)) : null;
+        const targetRole = targetRoleObj?.title ? String(targetRoleObj.title) : undefined;
+
+        return {
+          id: userId,
+          name: (p.full_name as string) || (p.first_name as string) || `Candidate ${idx + 1}`,
+          rollNo: (p.roll_no as string) || undefined,
+          phone: (p.phone as string) || undefined,
+          department: dept,
+          academicYear: p.academic_year ? `${p.academic_year}th Year (${batchFilter} Batch)` : undefined,
+          status,
+          targetRole,
+          readinessScore,
+          completedAt,
+          auditId: session?.id ? String(session.id) : null,
+        };
+      });
+
+      // Filter by department if requested
+      const filteredStudents = deptFilter && deptFilter !== 'all'
+        ? students.filter((s) => (s.department || '').toLowerCase().includes(deptFilter.toLowerCase()))
+        : students;
+
+      const totalStudents = filteredStudents.length;
+      const completedStudents = filteredStudents.filter((s) => s.status === 'completed');
+      const startedStudents = filteredStudents.filter((s) => s.status === 'started');
+      const invitedStudents = filteredStudents.filter((s) => s.status === 'invited');
+
+      const completedCount = completedStudents.length;
+      const startedCount = startedStudents.length;
+      const invitedCount = invitedStudents.length;
+
+      const validScores = completedStudents
+        .map((s) => s.readinessScore)
+        .filter((s): s is number => typeof s === 'number' && !isNaN(s) && s > 0);
+
+      const avgScore = validScores.length > 0
+        ? Math.round((validScores.reduce((a, b) => a + b, 0) / validScores.length) * 10) / 10
+        : null;
+
+      // Real top roles dynamically aggregated
+      const roleCounts = new Map<string, number>();
+      filteredStudents.forEach((s) => {
+        if (s.targetRole) {
+          roleCounts.set(s.targetRole, (roleCounts.get(s.targetRole) || 0) + 1);
+        }
+      });
+      const topRoles = Array.from(roleCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([roleTitle, studentCount]) => ({
+          roleTitle,
+          studentCount,
+          percentage: totalStudents > 0 ? Math.round((studentCount / totalStudents) * 100) : 0,
+          demandLevel: 'High',
+        }));
 
       return json({
         success: true,
         college: {
           id: collegeId,
-          name: 'BITS Pilani (Hyderabad Campus)',
+          name: collegeName,
           placementCell: 'Department of Training & Placement',
           targetBatch: `${batchFilter} Passing Out Batch`,
         },
         metrics: {
-          totalInvited: Math.max(totalStudents, 1),
+          totalInvited: totalStudents,
           startedCount,
           completedCount,
-          invitedCount: Math.max(totalStudents - startedCount, 0),
+          invitedCount,
           avgReadinessScore: avgScore,
-          participationRate: totalStudents > 0 ? Math.round((startedCount / totalStudents) * 100) : 75,
-          completionRate: totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 55,
+          participationRate: totalStudents > 0 ? Math.round(((startedCount + completedCount) / totalStudents) * 100) : 0,
+          completionRate: totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 0,
         },
         insights: {
           topRoles,
-          criticalGaps,
+          criticalGaps: [],
           readinessDistribution: {
-            ready: scores.filter((s) => s >= 75).length,
-            growing: scores.filter((s) => s >= 55 && s < 75).length,
-            foundation: scores.filter((s) => s < 55).length,
+            ready: validScores.filter((s) => s >= 75).length,
+            growing: validScores.filter((s) => s >= 55 && s < 75).length,
+            foundation: validScores.filter((s) => s < 55).length,
           },
         },
         managementMetrics: {
-          totalDepartments: 4,
+          totalDepartments: new Set(filteredStudents.map((s) => s.department).filter(Boolean)).size,
           overallInstitutionalReadiness: avgScore,
-          nirfEmployabilityScore: Math.min(100, Math.round(avgScore * 1.15)),
-          naacBenchmarkTier: avgScore >= 70 ? 'Tier A+ Benchmark' : 'Tier A Benchmark',
-          branches: [
-            { branchName: 'Computer Science', enrolledStudents: Math.floor(totalStudents * 0.5), completedAudits: Math.floor(completedCount * 0.6), avgScore: 68, placementReadyPercentage: 62, topSkillGap: 'System Design' },
-            { branchName: 'Electronics & Communication', enrolledStudents: Math.floor(totalStudents * 0.3), completedAudits: Math.floor(completedCount * 0.3), avgScore: 61, placementReadyPercentage: 48, topSkillGap: 'Embedded C' },
-          ],
+          nirfEmployabilityScore: avgScore ? Math.min(100, Math.round(avgScore * 1.15)) : null,
+          naacBenchmarkTier: avgScore ? (avgScore >= 70 ? 'Tier A+ Benchmark' : 'Tier A Benchmark') : null,
+          branches: [],
         },
-        students: profs.map((p, idx) => ({
-          id: p.id as string,
-          name: (p.first_name as string) || `Candidate ${idx + 1}`,
-          phone: p.phone as string,
-          department: (p.branch as string) || 'Computer Science',
-          batch: (p.grad_year as string) || '2026',
-          status: idx < completedCount ? 'completed' : 'started',
-          readinessScore: idx < scores.length ? scores[idx] : 62,
-          readinessBand: idx < scores.length && scores[idx] >= 75 ? 'Placement Ready' : 'Developing',
-          targetRole: roles[idx % roles.length]?.title || 'Software Development Engineer',
-        })),
+        students: filteredStudents,
       });
     } catch {
       return json({
         success: true,
-        college: { id: collegeId, name: 'Partner University', targetBatch: `${batchFilter} Batch` },
-        metrics: { totalInvited: 0, startedCount: 0, completedCount: 0, invitedCount: 0, avgReadinessScore: null },
+        college: { id: collegeId, name: 'Placement Portal', targetBatch: `${batchFilter} Batch` },
+        metrics: { totalInvited: 0, startedCount: 0, completedCount: 0, invitedCount: 0, avgReadinessScore: null, participationRate: 0, completionRate: 0 },
         insights: { topRoles: [], criticalGaps: [], readinessDistribution: { ready: 0, growing: 0, foundation: 0 } },
         students: [],
       });
+    }
+  }
+
+  // 14. Placement Preferences (Welcome banner dismissal persistence)
+  if (path === '/api/placement/preferences') {
+    if (method === 'GET') {
+      const userId = url.searchParams.get('userId');
+      if (userId && UUID_RE.test(userId) && supabaseUrl && supabaseKey) {
+        try {
+          const pRes = await fetch(`${supabaseUrl}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=career_discovery_profile`, {
+            headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+          });
+          if (pRes.ok) {
+            const list = (await pRes.json()) as Array<Record<string, unknown>>;
+            const disc = (list?.[0]?.career_discovery_profile as Record<string, unknown>) || {};
+            const placementPrefs = (disc?.placement_preferences as Record<string, unknown>) || {};
+            return json({
+              success: true,
+              preferences: {
+                welcomeBannerDismissed: Boolean(placementPrefs.welcomeBannerDismissed),
+              },
+            });
+          }
+        } catch {}
+      }
+      return json({ success: true, preferences: { welcomeBannerDismissed: false } });
+    }
+
+    if (method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const userId = typeof body?.userId === 'string' ? body.userId : '';
+        const welcomeBannerDismissed = Boolean(body?.welcomeBannerDismissed);
+
+        if (userId && UUID_RE.test(userId) && supabaseUrl && supabaseKey) {
+          const pRes = await fetch(`${supabaseUrl}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=career_discovery_profile`, {
+            headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+          });
+          let disc: Record<string, unknown> = {};
+          if (pRes.ok) {
+            const list = (await pRes.json()) as Array<Record<string, unknown>>;
+            if (list?.[0]?.career_discovery_profile && typeof list[0].career_discovery_profile === 'object') {
+              disc = list[0].career_discovery_profile as Record<string, unknown>;
+            }
+          }
+          const updatedDisc = {
+            ...disc,
+            placement_preferences: {
+              ...((disc.placement_preferences as Record<string, unknown>) || {}),
+              welcomeBannerDismissed,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+
+          await fetch(`${supabaseUrl}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}`, {
+            method: 'PATCH',
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+              career_discovery_profile: updatedDisc,
+              updated_at: new Date().toISOString(),
+            }),
+          });
+        }
+
+        return json({
+          success: true,
+          preferences: { welcomeBannerDismissed },
+        });
+      } catch (err) {
+        return json({ success: false, error: String(err) }, 400);
+      }
     }
   }
 

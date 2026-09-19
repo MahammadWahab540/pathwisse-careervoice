@@ -2547,6 +2547,61 @@ app.post('/api/college/workspace', async (req, res) => {
   }
 });
 
+app.get('/api/placement/preferences', async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const userId = optionalString(req.query.userId);
+    if (supabase && userId && UUID_RE.test(userId)) {
+      const pRes = await supabase.from('profiles').select('career_discovery_profile').eq('user_id', userId).maybeSingle();
+      const disc = (pRes.data?.career_discovery_profile as Record<string, unknown>) || {};
+      const prefs = (disc?.placement_preferences as Record<string, unknown>) || {};
+      return res.json({
+        success: true,
+        preferences: {
+          welcomeBannerDismissed: Boolean(prefs.welcomeBannerDismissed),
+        },
+      });
+    }
+    return res.json({ success: true, preferences: { welcomeBannerDismissed: false } });
+  } catch (error) {
+    return handleRouteError(res, error, 'placement_preferences_get');
+  }
+});
+
+app.post('/api/placement/preferences', async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const userId = optionalString(req.body?.userId);
+    const welcomeBannerDismissed = Boolean(req.body?.welcomeBannerDismissed);
+
+    if (supabase && userId && UUID_RE.test(userId)) {
+      const pRes = await supabase.from('profiles').select('career_discovery_profile').eq('user_id', userId).maybeSingle();
+      const disc = (pRes.data?.career_discovery_profile as Record<string, unknown>) || {};
+      const updatedDisc = {
+        ...disc,
+        placement_preferences: {
+          ...((disc.placement_preferences as Record<string, unknown>) || {}),
+          welcomeBannerDismissed,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      await supabase.from('profiles').update({
+        career_discovery_profile: updatedDisc,
+        updated_at: new Date().toISOString(),
+      }).eq('user_id', userId);
+    }
+
+    return res.json({
+      success: true,
+      preferences: { welcomeBannerDismissed },
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'placement_preferences_post');
+  }
+});
+
+
 app.get('/api/college/dashboard', async (req, res) => {
   try {
     const supabase = getSupabase();

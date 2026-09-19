@@ -203,7 +203,7 @@ export const RoleSelectionStep: React.FC<RoleSelectionStepProps> = ({
         </button>
 
         <p className="mt-2.5 text-xs text-[#94a3b8]">
-          You can switch between modes anytime in settings.
+          Secure role-based access powered by CareerVoice.
         </p>
       </div>
     </div>

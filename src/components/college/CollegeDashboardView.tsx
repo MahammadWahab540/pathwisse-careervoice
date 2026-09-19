@@ -106,14 +106,13 @@ export interface CollegeDashboardResponse {
 
 interface CollegeDashboardViewProps {
   collegeContext: CollegeContext | null;
-  onSwitchToStudent: () => void;
+  onSwitchToStudent?: () => void;
   onLogout?: () => void;
   trackEvent?: (name: string, meta?: Record<string, unknown>) => void;
 }
 
 export const CollegeDashboardView: React.FC<CollegeDashboardViewProps> = ({
   collegeContext,
-  onSwitchToStudent,
   onLogout,
   trackEvent,
 }) => {
@@ -521,18 +520,6 @@ export const CollegeDashboardView: React.FC<CollegeDashboardViewProps> = ({
                 </div>
 
                 <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowUserDropdown(false);
-                      onSwitchToStudent();
-                    }}
-                    className="w-full text-left px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                  >
-                    <GraduationCap className="w-4 h-4 text-[#1f3861]" />
-                    <span>Switch to Student View</span>
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => {
