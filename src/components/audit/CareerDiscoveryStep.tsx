@@ -190,7 +190,7 @@ export const CareerDiscoveryStep: React.FC<CareerDiscoveryStepProps> = ({
 
       <VoiceWaveform amplitude={amplitude} isListening={isListening} isSpeaking={isSpeaking} />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-3.5">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 shadow-sm text-left space-y-3.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#0b111e]">
             <Sparkles className="w-3.5 h-3.5 text-[#1f3861]" />

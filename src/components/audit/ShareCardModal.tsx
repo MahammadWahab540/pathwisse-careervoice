@@ -47,7 +47,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white border border-slate-200/80 rounded-3xl max-w-sm w-full p-6 space-y-4 text-left shadow-[0_20px_50px_rgb(0,0,0,0.15)] relative">
+      <div className="bg-white border border-slate-200/80 rounded-2xl max-w-sm w-full p-6 space-y-4 text-left shadow-[0_20px_50px_rgb(0,0,0,0.15)] relative">
         <button
           type="button"
           onClick={onClose}

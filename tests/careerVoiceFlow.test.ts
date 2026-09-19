@@ -54,7 +54,7 @@ test('OTP success checkpoint restores to ASK_NAME instead of WELCOME after reloa
   assert.equal(checkpoint.onboardingCheckpoint, 'ASK_NAME');
 });
 
-test('legacy verified identity without audit recovers deterministically to ASK_NAME', () => {
+test('legacy verified identity without audit recovers deterministically to STUDENT_DASHBOARD', () => {
   const storage = new MemoryStorage();
   storage.setItem(STUDENT_ID_KEY, 'dev_user_919100886544');
   storage.setItem(PHONE_KEY, '+919100886544');
@@ -69,7 +69,7 @@ test('legacy verified identity without audit recovers deterministically to ASK_N
   });
 
   assert.equal(checkpoint.authenticated, true);
-  assert.equal(checkpoint.onboardingCheckpoint, 'ASK_NAME');
+  assert.equal(checkpoint.onboardingCheckpoint, 'STUDENT_DASHBOARD');
   assert.equal(checkpoint.identity?.anonymousId, 'guest_legacy');
 });
 
@@ -121,6 +121,6 @@ test('invalid checkpoint data does not override a valid legacy student identity'
   });
 
   assert.equal(checkpoint.authenticated, true);
-  assert.equal(checkpoint.onboardingCheckpoint, 'ASK_NAME');
+  assert.equal(checkpoint.onboardingCheckpoint, 'STUDENT_DASHBOARD');
   assert.equal(checkpoint.identity?.studentId, 'student_1');
 });

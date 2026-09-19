@@ -66,7 +66,7 @@ export const LoadCompetencyModelStep: React.FC<LoadCompetencyModelStepProps> = (
           : `I am loading the readiness benchmark for ${role.title}, ${firstName || 'friend'}. Your audit will use this role standard.`}
       />
 
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 shadow-sm text-left space-y-4">
         {loading ? (
             <div className="py-14 flex flex-col items-center justify-center gap-3 text-center">
             <Loader2 className="w-7 h-7 animate-spin text-[#1f3861]" />

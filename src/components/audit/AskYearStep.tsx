@@ -50,9 +50,9 @@ export const AskYearStep: React.FC<AskYearStepProps> = ({
         onSpeak={() => speakText(subtitleText)}
       />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 my-2 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-3.5">
-        <label className="text-xs font-bold text-[#0b111e] flex items-center gap-1.5">
-          <Calendar className="w-3.5 h-3.5 text-[#1f3861]" />
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 my-2 shadow-xs text-left space-y-3.5">
+        <label className="text-xs font-bold text-[#0b111d] flex items-center gap-1.5">
+          <Calendar className="w-3.5 h-3.5 text-[#ea580c]" />
           Academic Year / Stage
         </label>
 
@@ -64,26 +64,26 @@ export const AskYearStep: React.FC<AskYearStepProps> = ({
                 key={y.label}
                 type="button"
                 onClick={() => setSelectedYear(y.label)}
-                className={`w-full p-3.5 rounded-2xl border text-left transition flex items-center justify-between gap-2 cursor-pointer ${
+                className={`w-full p-3 rounded-lg border text-left transition flex items-center justify-between gap-2 cursor-pointer ${
                   isSelected
-                    ? 'bg-blue-50/70 border-[#1f3861] shadow-xs'
-                    : 'bg-slate-50/70 border-slate-200/70 hover:border-slate-300'
+                    ? 'bg-orange-50/70 border-[#ea580c] shadow-xs'
+                    : 'bg-[#f8fafc] border-[#e2e8f0] hover:border-slate-300'
                 }`}
               >
                 <div>
-                  <span className={`text-xs font-bold ${isSelected ? 'text-[#1f3861]' : 'text-[#0b111e]'}`}>
+                  <span className={`text-xs font-bold ${isSelected ? 'text-[#0b111d]' : 'text-[#0b111d]'}`}>
                     {y.label}
                   </span>
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium mt-0.5">
+                  <div className="flex items-center gap-1.5 text-[10px] text-[#64748b] font-medium mt-0.5">
                     <span>{y.sub}</span>
                     <span>•</span>
-                    <span className="text-[#1f3861] font-semibold flex items-center gap-0.5">
+                    <span className="text-[#ea580c] font-semibold flex items-center gap-0.5">
                       <Clock className="w-2.5 h-2.5" />
                       {y.window}
                     </span>
                   </div>
                 </div>
-                {isSelected && <Check className="w-4 h-4 text-[#1f3861] shrink-0" />}
+                {isSelected && <Check className="w-4 h-4 text-[#ea580c] shrink-0" />}
               </button>
             );
           })}
@@ -91,14 +91,14 @@ export const AskYearStep: React.FC<AskYearStepProps> = ({
 
         <button
           onClick={handleNext}
-          className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer mt-3"
+          className="w-full py-3 px-4 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold text-xs sm:text-sm shadow-xs flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer mt-3"
         >
           <span>Continue</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-400 font-medium">
+      <p className="text-[11px] text-[#94a3b8] font-medium">
         Tailors expectations, project rigor, and placement readiness windows.
       </p>
     </div>

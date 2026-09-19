@@ -43,7 +43,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-lg bg-white rounded-3xl p-5 shadow-2xl border border-slate-200 text-left space-y-4 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-lg bg-white rounded-2xl p-5 shadow-2xl border border-slate-200 text-left space-y-4 max-h-[90vh] overflow-y-auto"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">

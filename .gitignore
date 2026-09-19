@@ -8,4 +8,5 @@ coverage/
 !.env.example
 .worktrees/
 supabase/.temp/
+.agents/
 

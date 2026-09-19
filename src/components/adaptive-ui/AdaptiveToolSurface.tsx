@@ -109,7 +109,7 @@ export const AdaptiveToolSurface: React.FC<AdaptiveToolSurfaceProps> = ({ calls,
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 16, scale: 0.98 }}
           transition={{ type: 'spring', damping: 24, stiffness: 280 }}
-          className="pointer-events-auto w-full max-w-[370px] overflow-hidden rounded-[24px] border border-slate-200 bg-white/98 shadow-[0_24px_80px_rgba(15,23,42,0.24)] backdrop-blur-xl"
+          className="pointer-events-auto w-full max-w-[370px] overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white/98 shadow-xl backdrop-blur-xl"
           aria-live="polite"
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">

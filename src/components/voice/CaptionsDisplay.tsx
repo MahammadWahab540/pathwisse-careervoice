@@ -53,7 +53,7 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -8, scale: 0.98 }}
           transition={{ duration: 0.28, ease: 'easeOut' }}
-          className="p-4 rounded-3xl bg-slate-50 border border-slate-200/80 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)]"
+          className="p-4 rounded-xl bg-slate-50 border border-[#e2e8f0] text-left shadow-xs"
         >
           <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#1f3861] uppercase tracking-wider mb-1">
             <Volume2 className="w-3.5 h-3.5 animate-pulse text-[#1f3861]" />
@@ -75,7 +75,7 @@ export const CaptionsDisplay: React.FC<CaptionsDisplayProps> = ({
           animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: -10 }}
           transition={{ duration: 0.28, ease: 'easeOut' }}
-          className="p-4 rounded-3xl bg-blue-50/60 border border-blue-200/70 text-left shadow-[0_2px_12px_rgb(0,0,0,0.02)] relative group"
+          className="p-4 rounded-xl bg-blue-50/60 border border-blue-200/70 text-left shadow-xs relative group"
         >
           <div className="flex items-center justify-between text-[10px] font-bold text-[#1f3861] uppercase tracking-wider mb-1">
             <span className="flex items-center gap-1.5">

@@ -67,15 +67,18 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
 
     fetch('/api/colleges')
       .then((res) => {
-        if (!res.ok) throw new Error('Unable to load colleges');
+        const ct = res.headers?.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          throw new Error('Unable to load colleges JSON');
+        }
         return res.json();
       })
       .then((payload) => {
         if (!isMounted || !Array.isArray(payload.colleges)) return;
         setColleges(payload.colleges.length > 0 ? payload.colleges : FALLBACK_COLLEGES);
       })
-      .catch((err) => {
-        console.warn('College catalog fallback in use:', err);
+      .catch(() => {
+        if (isMounted) setColleges(FALLBACK_COLLEGES);
       });
 
     return () => {
@@ -121,10 +124,10 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
         onSpeak={() => speakText(subtitleText)}
       />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 my-2 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-3.5">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 my-2 shadow-xs text-left space-y-3.5">
         <div>
-          <label className="text-xs font-bold text-[#0b111e] flex items-center gap-1.5 mb-2">
-            <Building2 className="w-3.5 h-3.5 text-[#1f3861]" />
+          <label className="text-xs font-bold text-[#0b111d] flex items-center gap-1.5 mb-2">
+            <Building2 className="w-3.5 h-3.5 text-[#ea580c]" />
             Your College / University
           </label>
           <div className="relative">
@@ -133,10 +136,10 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search e.g. VIT, IIT, SRM, BITS..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-9 pr-3.5 py-2.5 text-xs text-[#0b111e] font-semibold focus:outline-none focus:border-[#1f3861] focus:bg-white transition"
+              className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-lg pl-9 pr-3.5 py-2.5 text-xs text-[#0b111d] font-semibold focus:outline-none focus:border-[#ea580c] focus:bg-white focus:ring-2 focus:ring-orange-500/20 transition"
               autoFocus
             />
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-[#94a3b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
         </div>
 
@@ -149,27 +152,27 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
                 key={col.id}
                 type="button"
                 onClick={() => handleSelect(col.name, col.id)}
-                className={`w-full p-3 rounded-2xl border text-left text-xs transition flex items-center justify-between gap-2 cursor-pointer ${
+                className={`w-full p-2.5 rounded-lg border text-left text-xs transition flex items-center justify-between gap-2 cursor-pointer ${
                   isSelected
-                    ? 'bg-blue-50/70 border-[#1f3861] text-[#1f3861] font-bold shadow-xs'
-                    : 'bg-slate-50/70 border-slate-200/70 text-[#0b111e] hover:border-slate-300'
+                    ? 'bg-orange-50/70 border-[#ea580c] text-[#0b111d] font-bold shadow-xs'
+                    : 'bg-[#f8fafc] border-[#e2e8f0] text-[#334155] hover:border-slate-300'
                 }`}
               >
                 <div className="min-w-0">
                   <span className="line-clamp-1">{col.name}</span>
                   {col.tier && col.tier !== 'Custom' && (
-                    <span className="text-[10px] text-slate-500 font-medium block mt-0.5">{col.tier}</span>
+                    <span className="text-[10px] text-[#64748b] font-medium block mt-0.5">{col.tier}</span>
                   )}
                 </div>
-                {isSelected && <Check className="w-4 h-4 text-[#1f3861] shrink-0" />}
+                {isSelected && <Check className="w-4 h-4 text-[#ea580c] shrink-0" />}
               </button>
             );
           })}
         </div>
 
         {isCustom && (
-          <div className="pt-2 border-t border-slate-100">
-            <label className="text-[11px] font-bold text-[#0b111e] block mb-1">
+          <div className="pt-2 border-t border-[#e2e8f0]">
+            <label className="text-[11px] font-bold text-[#0b111d] block mb-1">
               Type your institute name:
             </label>
             <input
@@ -177,7 +180,7 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
               value={customCollege}
               onChange={(e) => setCustomCollege(e.target.value)}
               placeholder="e.g. Saintgits College of Engineering"
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 text-xs text-[#0b111e] font-semibold focus:outline-none focus:border-[#1f3861] focus:bg-white"
+              className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-3.5 py-2.5 text-xs text-[#0b111d] font-semibold focus:outline-none focus:border-[#ea580c] focus:bg-white focus:ring-2 focus:ring-orange-500/20"
               autoFocus
             />
           </div>
@@ -186,14 +189,14 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
         <button
           onClick={handleNext}
           disabled={!selectedCollege && !customCollege.trim()}
-          className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-40 active:scale-[0.98] cursor-pointer"
+          className="w-full py-3 px-4 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold text-xs sm:text-sm shadow-xs flex items-center justify-center gap-2 transition disabled:opacity-40 active:scale-[0.98] cursor-pointer"
         >
           <span>Continue</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-400 font-medium">
+      <p className="text-[11px] text-[#94a3b8] font-medium">
         Select your campus to contextualize placement hiring patterns.
       </p>
     </div>

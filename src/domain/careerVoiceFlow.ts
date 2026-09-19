@@ -1,7 +1,27 @@
 import type { UserIdentity } from '../types';
 
+export type UserRole = 'student' | 'placement_team' | 'college_management' | 'college';
+
+export interface CollegeContext {
+  collegeId?: string;
+  collegeName?: string;
+  department?: string;
+  officerName?: string;
+  officerEmail?: string;
+  targetBatch?: string;
+  studentCount?: number;
+  leadershipTitle?: string;
+  focusArea?: string;
+  roleType?: 'placement_team' | 'college_management';
+}
+
 export type CareerVoiceStep =
   | 'BOOTSTRAPPING'
+  | 'AUTH'
+  | 'ROLE_SELECTION'
+  | 'COLLEGE_ONBOARDING'
+  | 'COLLEGE_DASHBOARD'
+  | 'STUDENT_DASHBOARD'
   | 'WELCOME'
   | 'PHONE_OTP'
   | 'ASK_NAME'
@@ -21,6 +41,8 @@ export type CareerVoiceStep =
 
 export interface CareerVoiceCheckpoint {
   authenticated: boolean;
+  role?: UserRole;
+  collegeContext?: CollegeContext | null;
   identity: UserIdentity | null;
   onboardingCheckpoint: CareerVoiceStep;
   activeAuditId: string | null;
@@ -33,9 +55,16 @@ export const STUDENT_ID_KEY = 'careervoice_student_id';
 export const PHONE_KEY = 'careervoice_phone';
 export const AUTH_ACCESS_TOKEN_KEY = 'careervoice_supabase_access_token';
 export const ACTIVE_AUDIT_ID_KEY = 'careervoice_active_audit_id';
+export const USER_ROLE_KEY = 'careervoice_user_role';
+export const COLLEGE_CONTEXT_KEY = 'careervoice_college_context';
 
 const VALID_STEPS = new Set<CareerVoiceStep>([
   'BOOTSTRAPPING',
+  'AUTH',
+  'ROLE_SELECTION',
+  'COLLEGE_ONBOARDING',
+  'COLLEGE_DASHBOARD',
+  'STUDENT_DASHBOARD',
   'WELCOME',
   'PHONE_OTP',
   'ASK_NAME',
@@ -91,6 +120,8 @@ export function readCareerVoiceCheckpoint(storage: Pick<Storage, 'getItem'>): Ca
     if (!isCareerVoiceStep(parsed.onboardingCheckpoint)) return null;
     return {
       authenticated: Boolean(parsed.authenticated),
+      role: parsed.role,
+      collegeContext: parsed.collegeContext || null,
       identity: parsed.identity || null,
       onboardingCheckpoint: parsed.onboardingCheckpoint,
       activeAuditId: typeof parsed.activeAuditId === 'string' ? parsed.activeAuditId : null,
@@ -107,6 +138,8 @@ export function writeCareerVoiceCheckpoint(
   checkpoint: CareerVoiceCheckpoint
 ) {
   storage.setItem(FLOW_CHECKPOINT_KEY, JSON.stringify(checkpoint));
+  if (checkpoint.role) storage.setItem(USER_ROLE_KEY, checkpoint.role);
+  if (checkpoint.collegeContext) storage.setItem(COLLEGE_CONTEXT_KEY, JSON.stringify(checkpoint.collegeContext));
   if (checkpoint.identity?.studentId) storage.setItem(STUDENT_ID_KEY, checkpoint.identity.studentId);
   if (checkpoint.identity?.phone) storage.setItem(PHONE_KEY, checkpoint.identity.phone);
   if (checkpoint.identity?.accessToken) storage.setItem(AUTH_ACCESS_TOKEN_KEY, checkpoint.identity.accessToken);
@@ -143,16 +176,28 @@ export function resolveInitialCheckpoint(input: {
       : null);
 
   const authenticated = Boolean(input.checkpoint?.authenticated || identity?.studentId);
-  let onboardingCheckpoint: CareerVoiceStep = authenticated ? 'ASK_NAME' : 'WELCOME';
-  if (authenticated && input.checkpoint?.onboardingCheckpoint && input.checkpoint.onboardingCheckpoint !== 'WELCOME' && input.checkpoint.onboardingCheckpoint !== 'PHONE_OTP') {
+  const role = input.checkpoint?.role;
+  const collegeContext = input.checkpoint?.collegeContext;
+
+  const isCollegeRole = role === 'college' || role === 'placement_team' || role === 'college_management';
+
+  let onboardingCheckpoint: CareerVoiceStep = authenticated
+    ? isCollegeRole
+      ? 'COLLEGE_DASHBOARD'
+      : 'STUDENT_DASHBOARD'
+    : 'AUTH';
+
+  if (authenticated && input.checkpoint?.onboardingCheckpoint && input.checkpoint.onboardingCheckpoint !== 'WELCOME' && input.checkpoint.onboardingCheckpoint !== 'PHONE_OTP' && input.checkpoint.onboardingCheckpoint !== 'AUTH') {
     onboardingCheckpoint = input.checkpoint.onboardingCheckpoint;
   }
-  if (authenticated && activeAuditId && (!input.checkpoint || input.checkpoint.onboardingCheckpoint === 'WELCOME')) {
+  if (authenticated && activeAuditId && (!input.checkpoint || input.checkpoint.onboardingCheckpoint === 'WELCOME' || input.checkpoint.onboardingCheckpoint === 'AUTH')) {
     onboardingCheckpoint = 'CAREER_READINESS_AUDIT';
   }
 
   return {
     authenticated,
+    role,
+    collegeContext,
     identity,
     onboardingCheckpoint,
     activeAuditId,

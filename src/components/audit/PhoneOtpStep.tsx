@@ -199,7 +199,7 @@ export const PhoneOtpStep: React.FC<PhoneOtpStepProps> = ({ onVerified, trackEve
         onSpeak={() => speakText(subtitleText)}
       />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 my-2 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 my-2 shadow-sm text-left space-y-4">
         {!otpSent ? (
           <form onSubmit={handleSendOtp} className="space-y-4">
             <div>

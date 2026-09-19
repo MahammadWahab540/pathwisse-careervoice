@@ -24,6 +24,26 @@ export interface UserIdentity {
   referralCode?: string;
   campaignId?: string;
   collegeId?: string;
+  email?: string;
+  role?: string;
+  onboardingCompleted?: boolean;
+}
+
+export interface BranchReadinessSummary {
+  branchName: string;
+  enrolledStudents: number;
+  completedAudits: number;
+  avgScore: number;
+  placementReadyPercentage: number;
+  topSkillGap: string;
+}
+
+export interface CollegeManagementMetrics {
+  totalDepartments: number;
+  overallInstitutionalReadiness: number;
+  nirfEmployabilityScore: number;
+  naacBenchmarkTier: string;
+  branches: BranchReadinessSummary[];
 }
 
 export interface StudentContext {
@@ -279,3 +299,20 @@ export interface VoiceMetrics {
   totalTurnLatencyMs: number;
   interruptedCount: number;
 }
+
+export interface BranchReadinessSummary {
+  branch: string;
+  totalStudents: number;
+  completedAudits: number;
+  averageScore: number;
+  placementDriveReadyCount: number;
+  topRole: string;
+}
+
+export interface CollegeManagementMetrics {
+  branchSummaries: BranchReadinessSummary[];
+  overallReadiness: number;
+  nirfEmployabilityScore: number;
+  naacBenchmarkTier: string;
+}
+

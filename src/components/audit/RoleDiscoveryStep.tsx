@@ -108,12 +108,12 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
         </div>
 
         {isLoading ? (
-          <div className="p-8 rounded-3xl bg-white border border-slate-200 flex flex-col items-center justify-center space-y-2 text-center shadow-xs">
+          <div className="p-8 rounded-xl bg-white border border-slate-200 flex flex-col items-center justify-center space-y-2 text-center shadow-xs">
             <Loader2 className="w-6 h-6 animate-spin text-[#1f3861]" />
             <span className="text-xs text-slate-500 font-medium">Matching your profile with published benchmarks…</span>
           </div>
         ) : error ? (
-          <div className="p-5 rounded-3xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium space-y-2">
+          <div className="p-5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium space-y-2">
             <div className="flex items-center gap-1.5 font-bold">
               <AlertCircle className="w-4 h-4 text-rose-600" />
               <span>Could not load recommendations</span>
@@ -128,7 +128,7 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
             </button>
           </div>
         ) : recommendedRoles.length === 0 ? (
-          <div className="p-5 rounded-3xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-medium">
+          <div className="p-5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-medium">
             No published roles are configured for this career stream yet.
           </div>
         ) : (
@@ -141,7 +141,7 @@ export const RoleDiscoveryStep: React.FC<RoleDiscoveryStepProps> = ({
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.08, duration: 0.3 }}
-                  className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-2.5 transition hover:border-[#1f3861] group"
+                  className="p-4 rounded-xl bg-white border border-slate-200/80 shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-2.5 transition hover:border-[#1f3861] group"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-blue-50 text-[#1f3861] border border-blue-200/80">

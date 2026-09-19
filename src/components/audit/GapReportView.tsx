@@ -25,7 +25,7 @@ export const GapReportView: React.FC<GapReportViewProps> = ({ gaps, role, onNext
     <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-4 py-5 max-w-sm mx-auto text-center selection:bg-[#1f3861] selection:text-white space-y-4">
       <QalamCharacter state="CURIOUS" subtitles={`These are the ${role.title} skills to improve first, ranked by how much they affect your readiness.`} />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 shadow-sm text-left space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div><span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold flex items-center gap-1"><ShieldAlert className="w-3.5 h-3.5 text-rose-500" />Benchmarked Gap Analysis</span><h2 className="text-base font-bold text-[#0b111e] mt-0.5">Prioritised Career Gaps</h2></div>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{gaps.length} skills</span>

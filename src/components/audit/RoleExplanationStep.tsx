@@ -75,7 +75,7 @@ export const RoleExplanationStep: React.FC<RoleExplanationStepProps> = ({
       />
 
       {/* Main Container */}
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <div className="w-full bg-white border border-slate-200/80 rounded-xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
         {/* Header Badge */}
         <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-3">
           <div className="flex items-center justify-between">
