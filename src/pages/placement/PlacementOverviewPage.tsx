@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PlacementLayout } from '../../layouts/PlacementLayout';
 import { useAuth } from '../../context/AuthContext';
@@ -114,9 +114,10 @@ export function PlacementOverviewPage() {
     setError(null);
     try {
       const collegeId = collegeContext?.collegeId;
+      const userId = identity?.studentId;
       const [dashRes, campRes] = await Promise.all([
-        fetch(`/api/college/dashboard${collegeId ? `?collegeId=${collegeId}` : ''}`),
-        fetch(`/api/campaigns${collegeId ? `?collegeId=${collegeId}` : ''}`),
+        fetch(`/api/college/dashboard${collegeId ? `?collegeId=${encodeURIComponent(collegeId)}` : ''}`),
+        fetch(`/api/campaigns?createdBy=${encodeURIComponent(userId || '')}&collegeId=${encodeURIComponent(collegeId || '')}`),
       ]);
 
       if (!dashRes.ok) throw new Error(`Dashboard API returned ${dashRes.status}`);
@@ -359,7 +360,7 @@ export function PlacementOverviewPage() {
         {loading && (
           <div className="flex items-center justify-center gap-3 py-16">
             <Loader2 className="w-6 h-6 animate-spin text-[#ea580c]" />
-            <span className="text-xs font-semibold text-[#64748b]">Syncing live campaign signalsâ€¦</span>
+            <span className="text-xs font-semibold text-[#64748b]">Syncing live campaign signals...</span>
           </div>
         )}
 
@@ -448,11 +449,12 @@ export function PlacementOverviewPage() {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
                   <div className="space-y-3 max-w-xl">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        â— Active Campaign
+                      <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                        <span>Active Campaign</span>
                       </span>
                       <span className="text-xs font-medium text-[#64748b]">
-                        {collegeContext?.collegeName ?? 'Campus Cohort'} Â· {collegeContext?.targetBatch ?? '2026'} Batch
+                        {collegeContext?.collegeName ?? 'Campus Cohort'} · {collegeContext?.targetBatch ?? '2026'} Batch
                       </span>
                     </div>
 
@@ -764,12 +766,12 @@ export function PlacementOverviewPage() {
                             <td className="py-3 px-3">
                               <p className="font-semibold text-[#0b111d]">{student.name}</p>
                               <p className="text-[11px] text-[#64748b]">
-                                {student.rollNo || 'Roll Pending'} Â· {student.department || 'Engineering'}
+                                {student.rollNo || 'Roll Pending'} · {student.department || 'Engineering'}
                               </p>
                             </td>
 
                             <td className="py-3 px-3 text-[#334155] font-medium">
-                              {activeCampaign ? activeCampaign.name.slice(0, 24) + 'â€¦' : 'Campus Drive'}
+                              {activeCampaign ? activeCampaign.name.slice(0, 24) + '...' : 'Campus Drive'}
                             </td>
 
                             <td className="py-3 px-3">

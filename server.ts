@@ -1641,10 +1641,8 @@ app.get('/api/college/dashboard', async (req, res) => {
     for (const p of profs) {
       // If filtering by college, match college_id or context
       const isCollegeMatch =
-        !matchedCollegeId ||
-        p.college_id === matchedCollegeId ||
-        p.college_id === collegeId ||
-        !p.college_id; // Include unassigned demo profiles so user sees live registered users
+        (matchedCollegeId && p.college_id === matchedCollegeId) ||
+        (collegeId && collegeId !== 'custom_college' && p.college_id === collegeId);
 
       if (!isCollegeMatch) continue;
 

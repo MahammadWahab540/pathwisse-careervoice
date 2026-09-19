@@ -309,11 +309,14 @@ async function handleApi(request: Request, url: URL, env: Env, _ctx: ExecutionCo
 
   // 9. Campaigns: List (GET)
   if (path === '/api/campaigns' && method === 'GET') {
-    const createdBy = url.searchParams.get('createdBy') || url.searchParams.get('collegeId');
+    const createdBy = url.searchParams.get('createdBy');
+    const collegeId = url.searchParams.get('collegeId');
     try {
       let queryUrl = `${supabaseUrl}/rest/v1/campaigns?select=*&order=created_at.desc&limit=50`;
       if (createdBy && UUID_RE.test(createdBy)) {
         queryUrl += `&created_by=eq.${encodeURIComponent(createdBy)}`;
+      } else if (collegeId && collegeId !== 'all') {
+        queryUrl += `&institution=ilike.*${encodeURIComponent(collegeId)}*`;
       }
       const res = await fetch(queryUrl, {
         headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
@@ -496,8 +499,13 @@ async function handleApi(request: Request, url: URL, env: Env, _ctx: ExecutionCo
         collegeName = String(matchedCol.name);
       }
 
-      // Filter profs that are students (or not placement officers)
-      const studentProfs = profs.filter((p) => p.account_role !== 'placement_team' && p.account_role !== 'college');
+      // Filter profs that belong to this college and are students
+      const studentProfs = profs.filter((p) => {
+        if (p.account_role === 'placement_team' || p.account_role === 'college') return false;
+        if (matchedCol?.id && p.college_id === matchedCol.id) return true;
+        if (collegeId && collegeId !== 'custom_college' && p.college_id === collegeId) return true;
+        return false;
+      });
 
       // Map sessions and reports by user_id
       const sessionUserMap = new Map(sessions.map((s) => [String(s.user_id), s]));
