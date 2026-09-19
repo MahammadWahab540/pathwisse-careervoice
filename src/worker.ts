@@ -343,6 +343,48 @@ async function handleApi(request: Request, url: URL, env: Env, _ctx: ExecutionCo
     return json({ success: true, campaigns: [] });
   }
 
+  // 9b. Campaign by ID or Token: Get (GET)
+  if (path.startsWith('/api/campaigns/') && method === 'GET') {
+    const rawId = path.replace('/api/campaigns/', '').trim();
+    try {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/campaigns?or=(id.eq.${encodeURIComponent(rawId)},invite_token.eq.${encodeURIComponent(rawId)})&limit=1`,
+        { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+      );
+      if (res.ok) {
+        const list = (await res.json()) as Array<Record<string, unknown>>;
+        if (Array.isArray(list) && list.length > 0) {
+          const c = list[0];
+          return json({
+            success: true,
+            campaign: {
+              id: c.id,
+              campaignId: c.id,
+              name: c.name,
+              institution: c.institution,
+              department: c.department,
+              batch: c.batch,
+              graduationYear: c.graduation_year,
+              inviteToken: c.invite_token,
+              token: c.invite_token,
+              inviteUrl: c.invite_url || `${url.origin}/invite/${c.invite_token}`,
+              status: c.status,
+              expiresAt: c.expires_at,
+              createdAt: c.created_at,
+              stats: {
+                invited: 0,
+                started: 0,
+                completed: 0,
+                completionRate: 0,
+              },
+            },
+          });
+        }
+      }
+    } catch {}
+    return json({ success: false, error: 'Campaign not found' }, 404);
+  }
+
   // 10. Campaigns: Create (POST)
   if (path === '/api/campaigns' && method === 'POST') {
     try {
@@ -467,6 +509,101 @@ async function handleApi(request: Request, url: URL, env: Env, _ctx: ExecutionCo
       department,
       batch,
     });
+  }
+
+  // 12b. Student Audit Dossier (GET)
+  if (path.startsWith('/api/college/students/') && path.endsWith('/audit') && method === 'GET') {
+    const rawStudentId = path.replace('/api/college/students/', '').replace('/audit', '').trim();
+    try {
+      const [profRes, repRes, sessRes] = await Promise.all([
+        fetch(`${supabaseUrl}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(rawStudentId)},user_id.eq.${encodeURIComponent(rawStudentId)})&limit=1`, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+        }),
+        fetch(`${supabaseUrl}/rest/v1/audit_reports?user_id=eq.${encodeURIComponent(rawStudentId)}&order=created_at.desc&limit=1`, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+        }),
+        fetch(`${supabaseUrl}/rest/v1/audit_sessions?user_id=eq.${encodeURIComponent(rawStudentId)}&order=created_at.desc&limit=1`, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+        }),
+      ]);
+
+      const profData = profRes.ok ? await profRes.json() : [];
+      const repData = repRes.ok ? await repRes.json() : [];
+      const sessData = sessRes.ok ? await sessRes.json() : [];
+
+      const profile = Array.isArray(profData) && profData.length > 0 ? (profData[0] as Record<string, unknown>) : null;
+      const report = Array.isArray(repData) && repData.length > 0 ? (repData[0] as Record<string, unknown>) : null;
+      const session = Array.isArray(sessData) && sessData.length > 0 ? (sessData[0] as Record<string, unknown>) : null;
+
+      if (!profile && !report && !session) {
+        return json({ success: false, error: 'Student record not found' }, 404);
+      }
+
+      const name = (profile?.full_name as string) || (profile?.first_name as string) || `Candidate ${rawStudentId.slice(0, 8)}`;
+      const department = (profile?.department as string) || (profile?.branch as string) || 'Computer Science';
+      const academicYear = profile?.academic_year ? `${profile.academic_year}th Year` : undefined;
+      const rollNo = (profile?.roll_no as string) || undefined;
+      const phone = (profile?.phone as string) || undefined;
+      const email = (profile?.email as string) || undefined;
+
+      let readinessScore: number | null = null;
+      let benchmark = 75;
+      let status: 'Ready' | 'Attention Required' | 'Developing' | 'Pending' = 'Pending';
+      let strengths: string[] = [];
+      let gaps: string[] = [];
+      let evidenceCount = 0;
+      let lastAssessedAt: string | null = null;
+      let targetRole: string | undefined = undefined;
+
+      if (report) {
+        readinessScore = report.overall_score !== null && report.overall_score !== undefined ? Number(report.overall_score) : null;
+        benchmark = Number(report.hiring_benchmark) || 75;
+        if (readinessScore !== null) {
+          status = readinessScore >= benchmark ? 'Ready' : readinessScore >= 55 ? 'Developing' : 'Attention Required';
+        }
+        if (Array.isArray(report.strengths)) {
+          strengths = report.strengths.map((s: unknown) =>
+            typeof s === 'string' ? s : (s as Record<string, unknown>)?.skillName ? String((s as Record<string, unknown>).skillName) : (s as Record<string, unknown>)?.evidence ? String((s as Record<string, unknown>).evidence) : String(s)
+          );
+        }
+        if (Array.isArray(report.gaps)) {
+          gaps = report.gaps.map((g: unknown) =>
+            typeof g === 'string' ? g : (g as Record<string, unknown>)?.title ? String((g as Record<string, unknown>).title) : (g as Record<string, unknown>)?.description ? String((g as Record<string, unknown>).description) : String(g)
+          );
+        }
+        if (Array.isArray(report.evidence_ledger)) {
+          evidenceCount = report.evidence_ledger.length;
+        }
+        lastAssessedAt = typeof report.created_at === 'string' ? report.created_at : null;
+        targetRole = (report.target_role as string) || (report.target_role_id as string) || undefined;
+      } else if (session) {
+        status = 'Developing';
+      }
+
+      return json({
+        success: true,
+        student: {
+          id: rawStudentId,
+          studentId: rawStudentId,
+          name,
+          email,
+          phone,
+          department,
+          year: academicYear,
+          rollNo,
+          targetRole,
+          readinessScore,
+          benchmark,
+          status,
+          strengths,
+          gaps,
+          evidenceCount,
+          lastAssessedAt,
+        },
+      });
+    } catch (err) {
+      return json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   }
 
   // 13. College Dashboard Overview

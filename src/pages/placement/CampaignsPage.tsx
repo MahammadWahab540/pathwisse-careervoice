@@ -30,7 +30,7 @@ interface Campaign {
 
 export function CampaignsPage() {
   const navigate = useNavigate();
-  const { collegeContext } = useAuth();
+  const { identity, collegeContext } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +41,11 @@ export function CampaignsPage() {
     setLoading(true);
     setError(null);
     try {
-      const collegeId = collegeContext?.collegeId;
-      const res = await fetch(`/api/campaigns${collegeId ? `?collegeId=${collegeId}` : ''}`);
+      const params = new URLSearchParams();
+      if (collegeContext?.collegeId) params.set('collegeId', collegeContext.collegeId);
+      if (identity?.uid) params.set('createdBy', identity.uid);
+      const qs = params.toString();
+      const res = await fetch(`/api/campaigns${qs ? `?${qs}` : ''}`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const json = await res.json();
       setCampaigns(Array.isArray(json?.campaigns) ? json.campaigns : []);
@@ -51,7 +54,7 @@ export function CampaignsPage() {
     } finally {
       setLoading(false);
     }
-  }, [collegeContext?.collegeId]);
+  }, [collegeContext?.collegeId, identity?.uid]);
 
   useEffect(() => {
     fetchCampaigns();

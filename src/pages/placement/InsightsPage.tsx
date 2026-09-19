@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PlacementLayout } from '../../layouts/PlacementLayout';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -14,6 +15,7 @@ import {
   ShieldAlert,
   Compass,
   Zap,
+  Plus,
 } from 'lucide-react';
 
 interface TopRole {
@@ -57,6 +59,7 @@ const GAP_PRIORITY_STYLES: Record<string, { bg: string; text: string; border: st
 };
 
 export function InsightsPage() {
+  const navigate = useNavigate();
   const { collegeContext } = useAuth();
   const [insights, setInsights] = useState<InsightsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,78 +87,17 @@ export function InsightsPage() {
     fetchInsights();
   }, [fetchInsights]);
 
-  // Robust fallback data if cohort is still taking first assessments
-  const effectiveInsights: InsightsData = useMemo(() => {
-    if (
-      insights &&
+  const hasInsightsData = Boolean(
+    insights &&
       ((insights.topRoles && insights.topRoles.length > 0) ||
         (insights.criticalGaps && insights.criticalGaps.length > 0) ||
         (insights.readinessDistribution &&
           (insights.readinessDistribution.ready > 0 ||
             insights.readinessDistribution.growing > 0 ||
             insights.readinessDistribution.foundation > 0)))
-    ) {
-      return insights;
-    }
-    return {
-      readinessDistribution: {
-        ready: 42,
-        growing: 58,
-        foundation: 20,
-      },
-      topRoles: [
-        {
-          roleTitle: 'Full-Stack Web Developer (React + Node)',
-          studentCount: 48,
-          percentage: 40,
-          demandLevel: 'Extremely High',
-        },
-        {
-          roleTitle: 'Data Analyst & BI Specialist',
-          studentCount: 32,
-          percentage: 27,
-          demandLevel: 'High',
-        },
-        {
-          roleTitle: 'Cloud & DevOps Support Associate',
-          studentCount: 24,
-          percentage: 20,
-          demandLevel: 'High',
-        },
-        {
-          roleTitle: 'Embedded Systems & IoT Engineer',
-          studentCount: 16,
-          percentage: 13,
-          demandLevel: 'Moderate',
-        },
-      ],
-      criticalGaps: [
-        {
-          skillName: 'System Architecture & Schema Design',
-          gapAverage: 42,
-          affectedCount: 38,
-          priority: 'Critical',
-          recommendedAction: 'Mandate Pathwisse 3-day workshop on relational normalization and API endpoints.',
-        },
-        {
-          skillName: 'Production Debugging & Async State Handling',
-          gapAverage: 35,
-          affectedCount: 29,
-          priority: 'High',
-          recommendedAction: 'Schedule practical pairing sessions on error boundaries and race conditions.',
-        },
-        {
-          skillName: 'Data Structures: Tree Traversals & Hash Optimizations',
-          gapAverage: 28,
-          affectedCount: 22,
-          priority: 'Medium',
-          recommendedAction: 'Assign targeted coding drill modules with time-complexity constraints.',
-        },
-      ],
-    };
-  }, [insights]);
+  );
 
-  const dist = effectiveInsights.readinessDistribution;
+  const dist = insights?.readinessDistribution;
   const totalDist = dist ? dist.ready + dist.growing + dist.foundation : 0;
   const pct = (val: number) => (totalDist > 0 ? Math.round((val / totalDist) * 100) : 0);
 
@@ -212,7 +154,39 @@ export function InsightsPage() {
         )}
 
         {/* Main Content */}
-        {!loading && (
+        {!loading && !error && !hasInsightsData && (
+          <div className="bg-white border border-[#e2e8f0] rounded-2xl p-8 sm:p-12 shadow-xs text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-orange-50 border border-orange-200 text-[#ea580c] flex items-center justify-center mx-auto shadow-xs">
+              <BarChart3 className="w-7 h-7" />
+            </div>
+            <div className="max-w-md mx-auto space-y-1">
+              <h2 className="text-lg font-bold text-[#0b111d]">No Cohort Insights Available Yet</h2>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Insights, benchmark distributions, and critical skill gap signals populate automatically as students complete their CareerVoice diagnostic assessments.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/placement/campaigns/new')}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#ea580c] text-white text-xs font-bold hover:bg-[#c2410c] transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Assessment Campaign</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/placement/students')}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-[#e2e8f0] text-slate-700 text-xs font-bold hover:bg-slate-50 transition shadow-xs cursor-pointer"
+              >
+                <Users className="w-4 h-4 text-slate-500" />
+                <span>View Student Roster</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!loading && !error && hasInsightsData && (
           <div className="space-y-6">
             {/* Section 1: Readiness Distribution */}
             {dist && totalDist > 0 && (
@@ -287,7 +261,7 @@ export function InsightsPage() {
             )}
 
             {/* Section 2: Top Career Directions */}
-            {effectiveInsights.topRoles && effectiveInsights.topRoles.length > 0 && (
+            {insights?.topRoles && insights.topRoles.length > 0 && (
               <div className="bg-white border border-[#e2e8f0] rounded-xl p-6 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -300,7 +274,7 @@ export function InsightsPage() {
                 </div>
 
                 <div className="divide-y divide-[#e2e8f0]">
-                  {effectiveInsights.topRoles.map((role, i) => {
+                  {insights.topRoles.map((role, i) => {
                     const demandStyle =
                       DEMAND_STYLES[role.demandLevel] ?? DEMAND_STYLES['Moderate'];
 
@@ -345,7 +319,7 @@ export function InsightsPage() {
             )}
 
             {/* Section 3: Critical Skill Gaps */}
-            {effectiveInsights.criticalGaps && effectiveInsights.criticalGaps.length > 0 && (
+            {insights?.criticalGaps && insights.criticalGaps.length > 0 && (
               <div className="bg-white border border-[#e2e8f0] rounded-xl p-6 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -358,7 +332,7 @@ export function InsightsPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {effectiveInsights.criticalGaps.map((gap, i) => {
+                  {insights.criticalGaps.map((gap, i) => {
                     const pStyle =
                       GAP_PRIORITY_STYLES[gap.priority] ?? GAP_PRIORITY_STYLES.Medium;
 

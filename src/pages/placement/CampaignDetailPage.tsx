@@ -45,34 +45,64 @@ export function CampaignDetailPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    // Simulate / fetch campaign detail
-    const timer = setTimeout(() => {
-      // Mock / fallback campaign detail
-      const token = campaignId ? campaignId.slice(0, 12) : 'cv-tok-2026';
-      setCampaign({
-        id: campaignId || 'camp-default',
-        name: 'CSE 2026 Batch Assessment Drive',
-        token,
-        inviteUrl: `${window.location.origin}/invite/${token}`,
-        department: 'Computer Science and Engineering',
-        batch: '2026 Batch',
-        year: 'Final Year (4th)',
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 14 * 86400000).toISOString(),
-        status: 'active',
-        stats: {
-          invited: 142,
-          started: 118,
-          completed: 94,
-          completionRate: 66,
-        },
-      });
+    if (!campaignId) {
       setLoading(false);
-    }, 200);
+      setCampaign(null);
+      return;
+    }
 
-    return () => clearTimeout(timer);
-  }, [campaignId]);
+    setLoading(true);
+    const fetchDetail = async () => {
+      try {
+        const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.campaign) {
+            setCampaign(json.campaign);
+            return;
+          }
+        }
+        // Check list if direct get was not found
+        const collegeId = collegeContext?.collegeId;
+        const listRes = await fetch(`/api/campaigns${collegeId ? `?collegeId=${encodeURIComponent(collegeId)}` : ''}`);
+        if (listRes.ok) {
+          const listJson = await listRes.json();
+          const found = (listJson.campaigns || []).find(
+            (c: { id?: string; campaignId?: string; inviteToken?: string; token?: string }) =>
+              c.id === campaignId || c.campaignId === campaignId || c.inviteToken === campaignId || c.token === campaignId
+          );
+          if (found) {
+            setCampaign({
+              id: found.id || found.campaignId,
+              name: found.name,
+              token: found.inviteToken || found.token || campaignId,
+              inviteUrl: found.inviteUrl || `${window.location.origin}/invite/${found.inviteToken || campaignId}`,
+              department: found.department,
+              batch: found.batch,
+              year: found.graduationYear ? `${found.graduationYear} Batch` : undefined,
+              createdAt: found.createdAt,
+              expiresAt: found.expiresAt,
+              status: found.status || 'active',
+              stats: found.stats || {
+                invited: 0,
+                started: 0,
+                completed: 0,
+                completionRate: 0,
+              },
+            });
+            return;
+          }
+        }
+        setCampaign(null);
+      } catch {
+        setCampaign(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDetail();
+  }, [campaignId, collegeContext?.collegeId]);
 
   const handleCopyLink = async () => {
     if (!campaign?.inviteUrl) return;

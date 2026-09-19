@@ -77,75 +77,21 @@ export function StudentResultPage() {
       }
     }
 
-    // Fallback demo mock if matched or testing
-    if (!foundResult && assessmentId && assessmentId !== 'unknown') {
-      // If we have an assessmentId, check if it's the active audit
-      const activeId = localStorage.getItem('careervoice_active_audit_id');
-      if (activeId === assessmentId) {
-        // Construct standard fallback result
-        foundResult = {
-          auditId: assessmentId,
-          targetRoleId: 'software-engineer',
-          targetRole: 'Software Development Engineer',
-          overallScore: 78,
-          hiringBenchmark: 80,
-          distanceFromBenchmark: -2,
-          readinessStatus: 'Ready',
-          diagnosisSummary:
-            'Strong foundation in core technical domains with verified demonstration. Recommended for immediate placement drives with targeted polish on system architecture.',
-          whyRoleFits: ['Strong algorithmic thinking', 'Structured approach to system design'],
-          dimensionScores: {
-            careerClarity: 85,
-            technicalReadiness: 80,
-            projectReadiness: 75,
-            communication: 72,
-            placementReadiness: 82,
-            executionReadiness: 76,
-          },
-          strengths: [
-            {
-              skillId: 's1',
-              skillName: 'Algorithmic Problem Solving',
-              demonstratedScore: 88,
-              evidence: 'Systematic algorithmic thinking demonstrated during technical inquiry',
-              confidenceScore: 0.9,
-              whyItMatters: 'Essential for technical interview rounds',
-            },
-            {
-              skillId: 's2',
-              skillName: 'Engineering Tradeoffs',
-              demonstratedScore: 82,
-              evidence: 'Clear domain vocabulary and structured explanation of tradeoffs',
-              confidenceScore: 0.85,
-              whyItMatters: 'Key for architectural design',
-            },
-          ],
-          gaps: [
-            {
-              id: 'g1',
-              title: 'Production Observability',
-              severity: 'ORANGE',
-              description: 'Latency profiling and metrics monitoring under load',
-              recommendedAction: 'Practice with Prometheus and tracing workflows',
-            },
-          ],
-          evidenceLedger: [],
-          priorityRecommendations: [],
-          diagnosticConclusions: [],
-        };
-      }
+    if (foundResult) {
+      setResult(foundResult);
+      setRole(
+        foundRole || {
+          id: foundResult.targetRoleId || 'target-role',
+          title: foundResult.targetRole || 'Career Role',
+          category: 'core',
+          fitBand: 'STRONG',
+          rationale: foundResult.whyRoleFits?.[0] || 'Demonstrated aptitude during career assessment.',
+        }
+      );
+    } else {
+      setResult(null);
+      setRole(foundRole || null);
     }
-
-    setResult(foundResult);
-    setRole(
-      foundRole || {
-        id: 'software-engineer',
-        title: 'Software Development Engineer',
-        category: 'core',
-        fitBand: 'STRONG',
-        rationale: 'Demonstrated high aptitude for software craftsmanship and technical logic.',
-      }
-    );
     setLoading(false);
   }, [assessmentId]);
 
@@ -338,7 +284,7 @@ export function StudentResultPage() {
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-[#64748b]" />
               <span>
-                Based on <strong className="text-[#0b111d] font-mono tabular-nums">{result.evidenceLedger?.length || 8}</strong> demonstrated evidence signals
+                Based on <strong className="text-[#0b111d] font-mono tabular-nums">{result.evidenceLedger?.length ?? 0}</strong> demonstrated evidence signals
               </span>
             </div>
             <div className="flex items-center gap-2 font-medium">

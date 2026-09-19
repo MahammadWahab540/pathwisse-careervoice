@@ -28,11 +28,11 @@ interface StudentDossier {
   targetRole: string;
   readinessScore: number;
   benchmark: number;
-  status: 'Ready' | 'Attention Required' | 'Developing';
+  status: 'Ready' | 'Attention Required' | 'Developing' | 'Pending';
   strengths: string[];
   gaps: string[];
   evidenceCount: number;
-  lastAssessedAt: string;
+  lastAssessedAt: string | null;
 }
 
 export function StudentDossierPage() {
@@ -42,39 +42,58 @@ export function StudentDossierPage() {
   const [student, setStudent] = useState<StudentDossier | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => {
-      // Mock / fallback candidate dossier
-      const sid = studentId || 'std-2026-01';
-      setStudent({
-        id: sid,
-        studentId: sid,
-        name: sid === 'd0025cd5' ? 'Aarav Sharma' : `Candidate ${sid.slice(0, 8)}`,
-        email: `${sid.slice(0, 8)}@campus.edu`,
-        phone: '+91 98765 43210',
-        department: 'Computer Science and Engineering',
-        year: '4th Year (2026 Batch)',
-        rollNo: `22CS${Math.floor(100 + Math.random() * 900)}`,
-        targetRole: 'Cloud Infrastructure & DevOps Engineer',
-        readinessScore: 82,
-        benchmark: 80,
-        status: 'Ready',
-        strengths: [
-          'Demonstrated hands-on familiarity with container orchestration (Docker / Kubernetes)',
-          'Clear conceptual grasp of distributed reliability and CI/CD automation',
-          'Structured problem-solving during architectural interview prompt',
-        ],
-        gaps: [
-          'Observability pipelines (Prometheus / Grafana query writing under latency spikes)',
-          'Production disaster recovery runbook formulation and backup testing',
-        ],
-        evidenceCount: 9,
-        lastAssessedAt: new Date().toISOString(),
-      });
+    if (!studentId) {
       setLoading(false);
-    }, 200);
+      setStudent(null);
+      return;
+    }
 
-    return () => clearTimeout(timer);
+    setLoading(true);
+    const fetchDossier = async () => {
+      try {
+        const res = await fetch(`/api/college/students/${encodeURIComponent(studentId)}/audit`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.student) {
+            setStudent(json.student);
+            return;
+          }
+        }
+        // Fallback: search in college dashboard
+        const dashRes = await fetch('/api/college/dashboard');
+        if (dashRes.ok) {
+          const dashJson = await dashRes.json();
+          const found = (dashJson.students || []).find((s: { id: string; name: string; department?: string; academicYear?: string; rollNo?: string; targetRole?: string; readinessScore?: number | null; status?: string; completedAt?: string }) => s.id === studentId);
+          if (found) {
+            const score = found.readinessScore ?? null;
+            setStudent({
+              id: found.id,
+              studentId: found.id,
+              name: found.name,
+              department: found.department,
+              year: found.academicYear,
+              rollNo: found.rollNo,
+              targetRole: found.targetRole,
+              readinessScore: score,
+              benchmark: 75,
+              status: found.status === 'completed' ? (score !== null && score >= 75 ? 'Ready' : 'Developing') : 'Pending',
+              strengths: [],
+              gaps: [],
+              evidenceCount: 0,
+              lastAssessedAt: found.completedAt || null,
+            });
+            return;
+          }
+        }
+        setStudent(null);
+      } catch {
+        setStudent(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDossier();
   }, [studentId]);
 
   return (
@@ -123,20 +142,22 @@ export function StudentDossierPage() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <Badge
-                        variant={student.status === 'Ready' ? 'success' : 'warning'}
+                        variant={student.status === 'Ready' ? 'success' : student.status === 'Pending' ? 'neutral' : 'warning'}
                         size="sm"
                       >
                         {student.status.toUpperCase()}
                       </Badge>
-                      <span className="text-xs font-mono text-[#94a3b8]">
-                        Roll: {student.rollNo}
-                      </span>
+                      {student.rollNo && (
+                        <span className="text-xs font-mono text-[#94a3b8]">
+                          Roll: {student.rollNo}
+                        </span>
+                      )}
                     </div>
                     <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0b111d] tracking-tight">
                       {student.name}
                     </h1>
                     <p className="text-xs sm:text-sm text-[#64748b]">
-                      {student.department} · {student.year}
+                      {student.department}{student.year ? ` · ${student.year}` : ''}
                     </p>
                   </div>
                 </div>
@@ -147,9 +168,11 @@ export function StudentDossierPage() {
                   </span>
                   <div className="flex items-baseline gap-1">
                     <span className="text-3xl sm:text-4xl font-extrabold font-mono tabular-nums text-[#0b111d]">
-                      {student.readinessScore}
+                      {student.readinessScore !== null && student.readinessScore !== undefined ? student.readinessScore : '—'}
                     </span>
-                    <span className="text-xs font-bold text-[#94a3b8]">/100</span>
+                    {student.readinessScore !== null && student.readinessScore !== undefined && (
+                      <span className="text-xs font-bold text-[#94a3b8]">/100</span>
+                    )}
                   </div>
                   <span className="text-xs text-[#64748b]">
                     Target: <strong className="font-mono text-[#0b111d]">{student.benchmark}</strong>
@@ -162,7 +185,7 @@ export function StudentDossierPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-[#64748b]">Assessed Role:</span>
                   <span className="text-xs font-bold text-[#1f3861] px-2.5 py-1 rounded-md bg-[#f0f4fa] border border-[#d6e2ee]">
-                    {student.targetRole}
+                    {student.targetRole || 'Not Selected Yet'}
                   </span>
                 </div>
 
@@ -195,14 +218,20 @@ export function StudentDossierPage() {
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   <span>Verified Competencies</span>
                 </div>
-                <ul className="space-y-3">
-                  {student.strengths.map((str, idx) => (
-                    <li key={idx} className="text-xs text-[#334155] leading-relaxed flex items-start gap-2.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
-                      <span>{str}</span>
-                    </li>
-                  ))}
-                </ul>
+                {student.strengths && student.strengths.length > 0 ? (
+                  <ul className="space-y-3">
+                    {student.strengths.map((str, idx) => (
+                      <li key={idx} className="text-xs text-[#334155] leading-relaxed flex items-start gap-2.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
+                        <span>{str}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[#64748b]">
+                    No verified competencies recorded yet. The student has not completed their diagnostic assessment.
+                  </p>
+                )}
               </div>
 
               {/* Priority Gaps */}
@@ -211,14 +240,20 @@ export function StudentDossierPage() {
                   <AlertTriangle className="w-4 h-4 text-amber-600" />
                   <span>Critical Skill Gaps</span>
                 </div>
-                <ul className="space-y-3">
-                  {student.gaps.map((gap, idx) => (
-                    <li key={idx} className="text-xs text-[#334155] leading-relaxed flex items-start gap-2.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
-                      <span>{gap}</span>
-                    </li>
-                  ))}
-                </ul>
+                {student.gaps && student.gaps.length > 0 ? (
+                  <ul className="space-y-3">
+                    {student.gaps.map((gap, idx) => (
+                      <li key={idx} className="text-xs text-[#334155] leading-relaxed flex items-start gap-2.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
+                        <span>{gap}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[#64748b]">
+                    No critical skill gaps identified yet.
+                  </p>
+                )}
               </div>
             </div>
 
