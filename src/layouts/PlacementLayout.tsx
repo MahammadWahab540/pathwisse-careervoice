@@ -10,7 +10,6 @@ import {
   X,
   Megaphone,
   FileText,
-  MessageSquare,
   Settings,
   ExternalLink,
   ShieldCheck,
@@ -27,7 +26,6 @@ const NAV_ITEMS = [
   { to: '/placement/students', label: 'Students', icon: Users, end: false },
   { to: '/placement/reports', label: 'Reports', icon: FileText, end: false },
   { to: '/placement/insights', label: 'Insights', icon: Lightbulb, end: false },
-  { to: '/placement/messages', label: 'Messages', icon: MessageSquare, end: false },
   { to: '/placement/settings', label: 'Settings', icon: Settings, end: false },
 ] as const;
 

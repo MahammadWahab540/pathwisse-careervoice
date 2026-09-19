@@ -135,7 +135,6 @@ CareerVoice result and student pages conclude with a single, clear, high-intent 
 | `/placement/reports` | Placement Team | `PlacementLayout` | Complete archive of student reports |
 | `/placement/reports/:reportId` | Placement Team | `PlacementLayout` | Detailed report inspect view |
 | `/placement/insights` | Placement Team | `PlacementLayout` | Cohort-wide career direction & skill gap analytics |
-| `/placement/messages` | Placement Team | `PlacementLayout` | Student cohort communication center |
 | `/placement/settings` | Placement Team | `PlacementLayout` | Placement cell profile & workspace settings |
 | `/unauthorized` | Any Authenticated | `AuthLayout` | Access denied for incorrect role |
 | `/404` | Public | `AuthLayout` | Not found fallback |

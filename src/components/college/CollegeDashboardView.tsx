@@ -410,7 +410,6 @@ export const CollegeDashboardView: React.FC<CollegeDashboardViewProps> = ({
         { id: 'Audits', label: 'Cohort Audits', icon: FileText },
         { id: 'Insights', label: 'Department Insights', icon: BarChart3 },
         { id: 'Eligible Students', label: 'Eligible Students', icon: GraduationCap },
-        { id: 'Messages', label: 'Broadcast Center', icon: MessageSquare, badge: true },
         { id: 'Settings', label: 'Settings', icon: Settings },
       ]
     : [
@@ -422,7 +421,6 @@ export const CollegeDashboardView: React.FC<CollegeDashboardViewProps> = ({
         { id: 'Eligible Students', label: 'Eligible Students', icon: GraduationCap },
         { id: 'Core Learning', label: 'Core Learning', icon: BookOpen },
         { id: 'Network Projects', label: 'Network Projects', icon: Layers },
-        { id: 'Messages', label: 'Messages', icon: MessageSquare, badge: true },
         { id: 'Settings', label: 'Settings', icon: Settings },
       ];
 
@@ -2284,77 +2282,6 @@ export const CollegeDashboardView: React.FC<CollegeDashboardViewProps> = ({
                   </p>
                 </div>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 9. Messages Subview */}
-      {activeNav === 'Messages' && (
-        <div className="space-y-6 text-left">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-            <h2 className="text-lg font-bold text-slate-900">Institutional Broadcast Center</h2>
-            <p className="text-xs text-slate-500">
-              Send urgent placement reminders, CareerVoice audit links, and interview schedules directly to students.
-            </p>
-
-            {/* Composer */}
-            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Target Audience</label>
-                  <select className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold">
-                    <option>All Enrolled Students ({allStudents.length})</option>
-                    <option>Pending / Incomplete Audits Only</option>
-                    <option>Placement Ready Students (&ge;65) Only</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Graduation Batch</label>
-                  <select className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold">
-                    <option>{selectedBatch} Passing Out Batch</option>
-                    <option>2027 Pre-Final Batch</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Announcement Content</label>
-                <textarea
-                  rows={3}
-                  value={announcementText}
-                  onChange={(e) => setAnnouncementText(e.target.value)}
-                  placeholder="e.g. Please complete your CareerVoice diagnostic audit before Friday 5 PM to be eligible for upcoming campus placement drives..."
-                  className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSendAnnouncement}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Send Announcement via SMS & WhatsApp</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Announcement History */}
-            <div className="space-y-3 pt-2">
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Broadcast History</h3>
-              <div className="space-y-2">
-                {sentAnnouncements.map((ann) => (
-                  <div key={ann.id} className="p-3.5 rounded-xl border border-slate-100 bg-white space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-900">Delivered to: {ann.target}</span>
-                      <span className="text-[10px] text-slate-400">{ann.time}</span>
-                    </div>
-                    <p className="text-xs text-slate-600">{ann.text}</p>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         </div>

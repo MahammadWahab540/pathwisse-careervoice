@@ -694,11 +694,11 @@ export function PlacementOverviewPage() {
 
                 <div className="mt-6 pt-3 border-t border-slate-100">
                   <button
-                    onClick={() => navigate('/placement/messages')}
+                    onClick={() => navigate('/placement/students')}
                     className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-center bg-[#f8fafc] hover:bg-slate-100 border border-[#e2e8f0] text-[#0b111d] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <Send className="w-3.5 h-3.5 text-[#ea580c]" />
-                    <span>Send Batch Reminder Nudge</span>
+                    <Users className="w-3.5 h-3.5 text-[#ea580c]" />
+                    <span>View All Cohort Students</span>
                   </button>
                 </div>
               </div>

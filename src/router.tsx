@@ -20,7 +20,6 @@ import { StudentDossierPage } from './pages/placement/StudentDossierPage';
 import { ReportsPage } from './pages/placement/ReportsPage';
 import { ReportDetailPage } from './pages/placement/ReportDetailPage';
 import { InsightsPage } from './pages/placement/InsightsPage';
-import { MessagesPage } from './pages/placement/MessagesPage';
 import { SettingsPage } from './pages/placement/SettingsPage';
 import { UnauthorizedPage } from './pages/UnauthorizedPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -148,7 +147,7 @@ export function AppRouter() {
         />
         <Route
           path="/placement/messages"
-          element={<AuthGuard><PlacementGuard><MessagesPage /></PlacementGuard></AuthGuard>}
+          element={<Navigate to="/placement" replace />}
         />
         <Route
           path="/placement/settings"

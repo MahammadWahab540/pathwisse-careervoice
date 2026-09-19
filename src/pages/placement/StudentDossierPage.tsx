@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   FileText,
   Download,
-  Mail,
   User,
   GraduationCap,
   Target,
@@ -190,14 +189,6 @@ export function StudentDossierPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    leftIcon={<Mail className="w-3.5 h-3.5" />}
-                    onClick={() => navigate('/placement/messages')}
-                  >
-                    Send Nudge
-                  </Button>
                   <Button
                     variant="navy"
                     size="sm"
