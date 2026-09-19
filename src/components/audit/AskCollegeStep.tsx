@@ -67,15 +67,18 @@ export const AskCollegeStep: React.FC<AskCollegeStepProps> = ({
 
     fetch('/api/colleges')
       .then((res) => {
-        if (!res.ok) throw new Error('Unable to load colleges');
+        const ct = res.headers?.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          throw new Error('Unable to load colleges JSON');
+        }
         return res.json();
       })
       .then((payload) => {
         if (!isMounted || !Array.isArray(payload.colleges)) return;
         setColleges(payload.colleges.length > 0 ? payload.colleges : FALLBACK_COLLEGES);
       })
-      .catch((err) => {
-        console.warn('College catalog fallback in use:', err);
+      .catch(() => {
+        if (isMounted) setColleges(FALLBACK_COLLEGES);
       });
 
     return () => {

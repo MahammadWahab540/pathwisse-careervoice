@@ -75,7 +75,11 @@ export const CollegeOnboardingStep: React.FC<CollegeOnboardingStepProps> = ({
   // Fetch live colleges from API
   useEffect(() => {
     fetch('/api/colleges')
-      .then((res) => res.json())
+      .then((res) => {
+        const ct = res.headers?.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) throw new Error('Non-JSON response');
+        return res.json();
+      })
       .then((data) => {
         if (Array.isArray(data?.colleges) && data.colleges.length > 0) {
           const list: CollegeOption[] = data.colleges.map((c: any) => ({
