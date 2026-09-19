@@ -8,6 +8,7 @@ interface RoadmapViewProps {
   role: CareerRoleTarget;
   onOpenShare: () => void;
   onOpenUpgrade: () => void;
+  onReturnToDashboard?: () => void;
   trackEvent: (eventName: string, metadata?: Record<string, unknown>) => void;
 }
 
@@ -16,6 +17,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
   role,
   onOpenShare,
   onOpenUpgrade,
+  onReturnToDashboard,
   trackEvent,
 }) => {
   useEffect(() => {
@@ -39,7 +41,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
           : 'Your audit is complete. Some gaps need a custom action before a guided lesson is available.'}
       />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 shadow-sm text-left space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span className="text-[10px] font-mono uppercase tracking-wider text-[#1f3861] font-bold">Diagnostic Next Actions</span>
@@ -99,11 +101,23 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
           ))}
         </div>
 
-        {mappedCount > 0 && (
-          <button type="button" onClick={onOpenUpgrade} className="w-full py-3 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"><Rocket className="w-4 h-4" /><span>Open Mapped Pathwisse Learning</span><ArrowRight className="w-3.5 h-3.5" /></button>
+        {onReturnToDashboard && (
+          <button
+            type="button"
+            onClick={onReturnToDashboard}
+            className="w-full py-3 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Complete & Return to Student Hub</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         )}
 
-        <button type="button" onClick={onOpenShare} className="w-full py-2.5 px-4 rounded-full bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"><Share2 className="w-4 h-4 text-[#1f3861]" /><span>Share My Verified Career Card</span></button>
+        {mappedCount > 0 && (
+          <button type="button" onClick={onOpenUpgrade} className="w-full py-2.5 px-4 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold text-xs shadow-xs flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"><Rocket className="w-4 h-4" /><span>Continue with Pathwisse →</span><ArrowRight className="w-3.5 h-3.5" /></button>
+        )}
+
+        <button type="button" onClick={onOpenShare} className="w-full py-2.5 px-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"><Share2 className="w-4 h-4 text-[#1f3861]" /><span>Share My Verified Career Card</span></button>
 
         <div className="text-[9px] text-slate-400 font-medium flex items-center gap-1"><ExternalLink className="w-3 h-3" /><span>Saved to this audit session</span></div>
       </div>

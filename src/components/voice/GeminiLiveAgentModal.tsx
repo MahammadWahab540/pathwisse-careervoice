@@ -88,7 +88,7 @@ export const GeminiLiveAgentModal: React.FC<GeminiLiveAgentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-[#0b111e]/60 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-md bg-white border border-[#e1e7ef] rounded-3xl p-5 shadow-xl flex flex-col items-center relative overflow-hidden text-center space-y-4">
+      <div className="w-full max-w-md bg-white border border-[#e1e7ef] rounded-2xl p-5 shadow-xl flex flex-col items-center relative overflow-hidden text-center space-y-4">
         {/* Modal Header */}
         <div className="w-full flex items-center justify-between border-b border-[#e1e7ef] pb-3">
           <div className="flex items-center gap-2">

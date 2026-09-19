@@ -58,11 +58,11 @@ export const AskNameStep: React.FC<AskNameStepProps> = ({ onComplete, trackEvent
         onSpeak={() => speakText(subtitleText)}
       />
 
-      <div className="w-full bg-white border border-slate-200/80 rounded-3xl p-5 my-2 shadow-[0_4px_20px_rgb(0,0,0,0.03)] text-left space-y-4">
+      <div className="w-full bg-white border border-[#e2e8f0] rounded-xl p-5 my-2 shadow-xs text-left space-y-4">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-xs font-bold text-[#0b111e] flex items-center gap-1.5 mb-2">
-              <User className="w-3.5 h-3.5 text-[#1f3861]" />
+            <label className="text-xs font-bold text-[#0b111d] flex items-center gap-1.5 mb-2">
+              <User className="w-3.5 h-3.5 text-[#ea580c]" />
               Your First Name
             </label>
             <div className="relative">
@@ -74,16 +74,16 @@ export const AskNameStep: React.FC<AskNameStepProps> = ({ onComplete, trackEvent
                   setError(null);
                 }}
                 placeholder="e.g. Rahul, Ananya, Vikram..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-[#0b111e] font-semibold focus:outline-none focus:border-[#1f3861] focus:bg-white focus:ring-2 focus:ring-blue-100 transition pr-12"
+                className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-3.5 py-2.5 text-sm text-[#0b111d] font-semibold focus:outline-none focus:border-[#ea580c] focus:bg-white focus:ring-2 focus:ring-orange-500/20 transition pr-12"
                 autoFocus
               />
               <button
                 type="button"
                 onClick={() => (isListening ? stopListening() : startListening())}
-                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-2 rounded-xl transition cursor-pointer ${
+                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition cursor-pointer ${
                   isListening
                     ? 'bg-rose-500 text-white animate-pulse shadow-xs'
-                    : 'text-slate-500 hover:text-[#1f3861] hover:bg-slate-200/70'
+                    : 'text-[#64748b] hover:text-[#0b111d] hover:bg-slate-100'
                 }`}
                 title="Speak your name"
               >
@@ -96,7 +96,7 @@ export const AskNameStep: React.FC<AskNameStepProps> = ({ onComplete, trackEvent
 
           <button
             type="submit"
-            className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+            className="w-full py-3 px-4 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold text-xs sm:text-sm shadow-xs flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
           >
             <span>Continue</span>
             <ArrowRight className="w-4 h-4" />
@@ -104,8 +104,8 @@ export const AskNameStep: React.FC<AskNameStepProps> = ({ onComplete, trackEvent
         </form>
       </div>
 
-      <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 font-medium">
-        <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+      <div className="flex items-center justify-center gap-1.5 text-[11px] text-[#64748b] font-medium">
+        <Sparkles className="w-3.5 h-3.5 text-[#ea580c]" />
         <span>You can speak or type your answers anytime.</span>
       </div>
     </div>

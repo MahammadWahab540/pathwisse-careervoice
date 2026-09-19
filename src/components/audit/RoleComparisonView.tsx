@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import type { RoleRecommendationDto } from '../../types/career';
 import { Scale, Check, ArrowRight, X, Sparkles, TrendingUp, Target } from 'lucide-react';
 
@@ -21,7 +21,7 @@ export const RoleComparisonView: React.FC<RoleComparisonViewProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-      <div className="w-full max-w-lg max-h-[90vh] bg-white rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-lg max-h-[90vh] bg-white rounded-2xl border border-[#e2e8f0] shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-2">

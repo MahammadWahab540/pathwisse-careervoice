@@ -61,7 +61,7 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
         subtitles={`Here is your ${role.title} diagnostic readiness report, based on the evidence you shared against the ${result.hiringBenchmark}/100 benchmark.`}
       />
 
-      <div className="w-full rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-[0_4px_20px_rgb(0,0,0,0.03)] space-y-5">
+      <div className="w-full rounded-xl border border-[#e2e8f0] bg-white p-5 text-left shadow-sm space-y-5">
         {/* 1. Target Role & Verified Direction */}
         <div className="flex items-start justify-between border-b border-slate-100 pb-4">
           <div>
@@ -264,9 +264,9 @@ export const ReadinessReportView: React.FC<ReadinessReportViewProps> = ({
         <button
           type="button"
           onClick={onNext}
-          className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+          className="w-full py-3.5 px-4 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
         >
-          <span>View Prioritised Skill Gaps & Roadmap</span>
+          <span>Continue with Pathwisse →</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>

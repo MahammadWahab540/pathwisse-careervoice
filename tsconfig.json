@@ -24,6 +24,8 @@
     "noEmit": true
   },
   "exclude": [
-    "supabase/functions/**"
+    "supabase/functions/**",
+    "dist",
+    "node_modules"
   ]
 }
