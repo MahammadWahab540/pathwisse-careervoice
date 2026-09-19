@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   CROSSWALK_COLUMNS,
   validateCrosswalkManifest,
@@ -7,6 +8,42 @@ import {
 } from '../scripts/validate-career-voice-crosswalk';
 
 const uuid = (value: number) => `00000000-0000-4000-8000-${value.toString().padStart(12, '0')}`;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const catalogPayload = {
+  source_id: 'pathwisse-production-export',
+  content_version: '2026-09-15',
+  paths: [{
+    id: uuid(501),
+    slug: 'approved-path',
+    title: 'Approved Path',
+    career_voice_role_id: uuid(1),
+    published: true,
+  }],
+  skills: [{
+    id: uuid(502),
+    career_path_id: uuid(501),
+    slug: 'approved-skill',
+    title: 'Approved Skill',
+    published: true,
+  }],
+  stages: [
+    { id: uuid(504), skill_id: uuid(502), slug: 'advanced', title: 'Advanced', order_index: 2, published: true },
+    { id: uuid(503), skill_id: uuid(502), slug: 'foundation', title: 'Foundation', order_index: 1, published: true },
+  ],
+};
+const catalogChecksum = createHash('sha256').update(canonicalJson(catalogPayload)).digest('hex');
+
+function catalogSnapshot(overrides: Record<string, unknown> = {}) {
+  return { ...structuredClone(catalogPayload), content_checksum: catalogChecksum, ...overrides };
+}
 
 function unmappedRow(index: number): CrosswalkManifestRow {
   return {
@@ -64,7 +101,7 @@ function approvedRow(index = 0): CrosswalkManifestRow {
     match_method: 'exact_canonical_title',
     catalog_source_id: 'pathwisse-production-export',
     catalog_content_version: '2026-09-15',
-    catalog_content_checksum: 'a'.repeat(64),
+    catalog_content_checksum: catalogChecksum,
     decision: 'APPROVED',
     ambiguity_reason: null,
     reviewer: 'reviewer@example.com',
@@ -73,12 +110,18 @@ function approvedRow(index = 0): CrosswalkManifestRow {
 }
 
 function errorCodes(rows: unknown): string[] {
-  return validateCrosswalkManifest(rows, { inventory: inventory() }).errors.map((error) => error.code);
+  return validateCrosswalkManifest(rows, {
+    inventory: inventory(),
+    catalogSnapshot: catalogSnapshot(),
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
 }
 
 test('accepts a complete 110-row manifest with explicit UNMAPPED rows', () => {
   const rows = validManifest();
-  assert.deepEqual(validateCrosswalkManifest(rows, { inventory: inventory(rows) }), { valid: true, errors: [] });
+  assert.deepEqual(validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }), { valid: true, errors: [] });
 });
 
 test('requires exactly the documented columns and exactly 110 rows', () => {
@@ -137,7 +180,9 @@ test('accepts an APPROVED row with reviewed target UUIDs, stages, reviewer, and 
   const rows = validManifest();
   rows[0] = approvedRow();
 
-  assert.deepEqual(validateCrosswalkManifest(rows, { inventory: inventory(rows) }), { valid: true, errors: [] });
+  assert.deepEqual(validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }), { valid: true, errors: [] });
 });
 
 test('enforces the runbook approval score gates and a valid review timestamp', () => {
@@ -197,7 +242,9 @@ test('does not approve compound CareerVoice labels without the exact umbrella me
     match_method: 'exact_umbrella',
   };
 
-  const result = validateCrosswalkManifest(rows, { inventory: inventory(rows) });
+  const result = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  });
   assert.equal(result.errors.filter((error) => error.code === 'COMPOUND_NOT_UMBRELLA').length, 1);
   assert.equal(result.errors.find((error) => error.code === 'COMPOUND_NOT_UMBRELLA')?.row, 0);
 });
@@ -211,7 +258,9 @@ test('requires exact manifest key equality with the supplied published inventory
     cv_skill_slug: 'different-skill',
   };
 
-  const codes = validateCrosswalkManifest(rows, { inventory: publishedInventory }).errors.map((error) => error.code);
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: publishedInventory, catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
   assert.ok(codes.includes('KEY_NOT_IN_INVENTORY'));
   assert.ok(codes.includes('INVENTORY_KEY_MISSING'));
 });
@@ -222,7 +271,9 @@ test('rejects manifest role slugs and skill names that drift from the published 
   rows[0].cv_role_slug = 'different-role';
   rows[1].cv_skill_name = 'Different skill name';
 
-  const errors = validateCrosswalkManifest(rows, { inventory: publishedInventory }).errors;
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: publishedInventory, catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors;
   assert.equal(errors.filter((error) => error.code === 'INVENTORY_VALUE_MISMATCH').length, 2);
 });
 
@@ -232,7 +283,9 @@ test('requires an RFC3339 review timestamp that is not in the future', () => {
   rows[1] = { ...approvedRow(1), reviewed_at: '2999-01-01T00:00:00Z' };
   rows[2] = { ...approvedRow(2), reviewed_at: '2026-02-30T00:00:00Z' };
 
-  const errors = validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors;
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors;
   assert.equal(errors.filter((error) => error.code === 'INVALID_REVIEWED_AT').length, 3);
 });
 
@@ -241,7 +294,9 @@ test('rejects unsupported match methods and enforces their score ceilings', () =
   rows[0] = { ...approvedRow(), match_method: 'containment' };
   rows[1] = { ...approvedRow(1), match_method: 'invented_method' };
 
-  const errors = validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors;
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors;
   assert.ok(errors.some((error) => error.code === 'MATCH_METHOD_SCORE_CEILING' && error.row === 0));
   assert.ok(errors.some((error) => error.code === 'INVALID_MATCH_METHOD' && error.row === 1));
 });
@@ -260,12 +315,36 @@ test('validates retained REVIEW candidate evidence without requiring approval', 
     reviewed_at: null,
   };
 
-  const codes = validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors.map((error) => error.code);
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
   assert.ok(codes.includes('INVALID_REVIEW_CANDIDATE'));
   assert.ok(codes.includes('INVALID_UUID'));
   assert.ok(codes.includes('DUPLICATE_STAGE_ID'));
   assert.ok(codes.includes('INVALID_MATCH_METHOD'));
   assert.ok(codes.includes('INVALID_PROVENANCE'));
+});
+
+test('validates REVIEW candidate provenance and hierarchy against the trusted catalog', () => {
+  const rows = validManifest();
+  rows[0] = {
+    ...approvedRow(),
+    decision: 'REVIEW',
+    ambiguity_reason: 'Candidate requires semantic review',
+    reviewer: null,
+    reviewed_at: null,
+    catalog_content_version: 'drifted-version',
+    pw_stage_ids_json: [uuid(504), uuid(503)],
+  };
+
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: catalogSnapshot(),
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
+
+  assert.ok(codes.includes('CATALOG_PROVENANCE_MISMATCH'));
+  assert.ok(codes.includes('CATALOG_STAGE_MISMATCH'));
 });
 
 test('requires APPROVED rows to reference one catalog snapshot', () => {
@@ -277,7 +356,9 @@ test('requires APPROVED rows to reference one catalog snapshot', () => {
   };
 
   assert.ok(
-    validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors
+    validateCrosswalkManifest(rows, {
+      inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+    }).errors
       .some((error) => error.code === 'MIXED_CATALOG_SNAPSHOT'),
   );
 });
@@ -296,7 +377,168 @@ test('requires REVIEW candidate scores and margins to remain internally consiste
     reviewed_at: null,
   };
 
-  const codes = validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors.map((error) => error.code);
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows), catalogSnapshot: catalogSnapshot(), trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
   assert.ok(codes.includes('MARGIN_MISMATCH'));
   assert.ok(codes.includes('REVIEW_TOP_CANDIDATE_INVALID'));
+});
+
+test('fails closed when the authoritative catalog snapshot is absent', () => {
+  const rows = validManifest();
+
+  const codes = validateCrosswalkManifest(rows, { inventory: inventory(rows) }).errors.map((error) => error.code);
+
+  assert.ok(codes.includes('INVALID_CATALOG_SNAPSHOT'));
+});
+
+test('rejects a malformed catalog snapshot and duplicate catalog IDs', () => {
+  const rows = validManifest();
+  const malformed = catalogSnapshot({
+    paths: [
+      ...catalogPayload.paths,
+      { ...catalogPayload.paths[0], career_voice_role_id: 'not-a-uuid' },
+    ],
+  });
+
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: malformed,
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
+
+  assert.ok(codes.includes('INVALID_CATALOG_SNAPSHOT'));
+});
+
+test('rejects catalog fields outside the canonical digested schema', () => {
+  const rows = validManifest();
+  const snapshot = { ...catalogSnapshot(), unsigned_note: 'outside the digest' };
+
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: snapshot,
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors.map((error) => error.code);
+
+  assert.ok(codes.includes('INVALID_CATALOG_SNAPSHOT'));
+});
+
+test('requires each CareerVoice role binding to resolve to exactly one catalog path', () => {
+  const rows = validManifest();
+  const duplicateRolePayload = {
+    ...structuredClone(catalogPayload),
+    paths: [
+      ...structuredClone(catalogPayload.paths),
+      {
+        id: uuid(505),
+        slug: 'second-path',
+        title: 'Second Path',
+        career_voice_role_id: uuid(1),
+        published: true,
+      },
+    ],
+  };
+  const checksum = createHash('sha256').update(canonicalJson(duplicateRolePayload)).digest('hex');
+
+  const codes = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: { ...duplicateRolePayload, content_checksum: checksum },
+    trustedCatalogChecksum: checksum,
+  }).errors.map((error) => error.code);
+
+  assert.ok(codes.includes('INVALID_CATALOG_SNAPSHOT'));
+});
+
+test('recomputes the declared snapshot SHA-256 from the canonical payload', () => {
+  const rows = validManifest();
+  const tampered = catalogSnapshot();
+  tampered.skills[0].title = 'Tampered after export';
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: tampered,
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'CATALOG_CHECKSUM_MISMATCH'));
+});
+
+test('requires APPROVED provenance to exactly match the validated snapshot', () => {
+  const rows = validManifest();
+  rows[0] = { ...approvedRow(), catalog_content_version: 'other-version' };
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: catalogSnapshot(),
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'CATALOG_PROVENANCE_MISMATCH' && error.row === 0));
+});
+
+test('requires the APPROVED path to exist with its exact slug and reviewed CareerVoice role', () => {
+  const rows = validManifest();
+  rows[0] = { ...approvedRow(), pw_career_path_slug: 'drifted-path-label' };
+  const wrongRoleSnapshot = catalogSnapshot();
+  wrongRoleSnapshot.paths[0].career_voice_role_id = uuid(99);
+  const wrongRolePayload = { ...wrongRoleSnapshot };
+  delete (wrongRolePayload as Partial<typeof wrongRoleSnapshot>).content_checksum;
+  wrongRoleSnapshot.content_checksum = createHash('sha256').update(canonicalJson(wrongRolePayload)).digest('hex');
+  rows[0].catalog_content_checksum = wrongRoleSnapshot.content_checksum;
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: wrongRoleSnapshot,
+    trustedCatalogChecksum: wrongRoleSnapshot.content_checksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'CATALOG_PATH_MISMATCH' && error.row === 0));
+});
+
+test('requires the APPROVED skill to be an exact labeled child of its path', () => {
+  const rows = validManifest();
+  rows[0] = { ...approvedRow(), pw_skill_title: 'Drifted title' };
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: catalogSnapshot(),
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'CATALOG_SKILL_MISMATCH' && error.row === 0));
+});
+
+test('requires selected published child stages in order_index then UUID order', () => {
+  const rows = validManifest();
+  rows[0] = { ...approvedRow(), pw_stage_ids_json: [uuid(504), uuid(503)] };
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: catalogSnapshot(),
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'CATALOG_STAGE_MISMATCH' && error.row === 0));
+});
+
+test('rejects a self-consistent snapshot that does not match the externally trusted checksum', () => {
+  const rows = validManifest();
+  const forgedSnapshot = catalogSnapshot();
+  forgedSnapshot.skills[0].title = 'Forged approved title';
+  const forgedPayload = { ...forgedSnapshot };
+  delete (forgedPayload as Partial<typeof forgedSnapshot>).content_checksum;
+  forgedSnapshot.content_checksum = createHash('sha256').update(canonicalJson(forgedPayload)).digest('hex');
+  rows[0] = {
+    ...approvedRow(),
+    pw_skill_title: 'Forged approved title',
+    catalog_content_checksum: forgedSnapshot.content_checksum,
+  };
+
+  const errors = validateCrosswalkManifest(rows, {
+    inventory: inventory(rows),
+    catalogSnapshot: forgedSnapshot,
+    trustedCatalogChecksum: catalogChecksum,
+  }).errors;
+
+  assert.ok(errors.some((error) => error.code === 'UNTRUSTED_CATALOG_SNAPSHOT'));
 });
