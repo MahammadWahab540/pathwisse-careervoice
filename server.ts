@@ -116,6 +116,7 @@ interface DevCampaignRecord {
 }
 
 const devCampaigns = new Map<string, DevCampaignRecord>();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const initialDemoCampaign: DevCampaignRecord = {
   id: 'cmp_2026_campus_drive',
@@ -4520,9 +4521,11 @@ app.post('/api/campaigns', async (req, res) => {
     const supabase = getSupabase();
     if (supabase) {
       try {
+        const validCreatedBy = (createdBy && UUID_REGEX.test(createdBy)) ? createdBy : null;
         const { data: campaign, error } = await supabase
           .from('campaigns')
           .insert({
+            id: campaignId,
             name,
             institution,
             department,
@@ -4532,7 +4535,7 @@ app.post('/api/campaigns', async (req, res) => {
             invite_url: inviteUrl,
             expires_at: expiresAt,
             status: 'active',
-            created_by: createdBy || null,
+            created_by: validCreatedBy,
             created_at: createdAt,
           })
           .select()
@@ -4596,7 +4599,7 @@ app.get('/api/campaigns', async (req, res) => {
           .order('created_at', { ascending: false })
           .limit(50);
 
-        if (createdBy) {
+        if (createdBy && UUID_REGEX.test(createdBy)) {
           query = query.eq('created_by', createdBy);
         }
 
