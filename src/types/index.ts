@@ -181,26 +181,7 @@ export interface RoadmapWeek {
   completed?: boolean;
 }
 
-export interface CareerAuditRoadmapHandoff {
-  contract: 'career-audit-roadmap-contract:v1';
-  auditId: string;
-  studentId: string;
-  targetRoleId: string;
-  readinessScore: number;
-  priorityGaps: Array<{
-    gapId: string;
-    skillId: string;
-    skillName: string;
-    expectedScore: number;
-    demonstratedScore: number;
-    gapScore: number;
-    priority: GapPriority;
-    mappingStatus: 'MAPPED' | 'UNMAPPED';
-    recommendedPathwisseSkillId?: string;
-    recommendedStageIds: string[];
-    evidenceIds: string[];
-  }>;
-}
+export type CareerAuditRoadmapHandoff = import('../domain/careerAudit').RoadmapHandoffContract;
 
 export interface CareerAuditResult {
   auditId: string;

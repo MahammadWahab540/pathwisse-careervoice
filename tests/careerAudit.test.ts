@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  type AuditReportContract,
+  type RoadmapHandoffContract,
+  calculateReadiness,
   calculateRoleFit,
   calculateSkillGap,
   calculateSkillScore,
@@ -86,6 +89,125 @@ test('canonical signal parser rejects the old evidenceLevel contract', () => {
       source: 'voice_probe',
     })
   );
+});
+
+
+test('calculateReadiness uses shared weighted readiness math', () => {
+  const score = calculateReadiness({
+    careerClarity: 100,
+    technicalReadiness: 80,
+    projectReadiness: 70,
+    communication: 60,
+    placementReadiness: 50,
+    executionReadiness: 40,
+  });
+
+  assert.equal(score, 68);
+  assert.equal(readinessStatusForScore(score), 'Developing');
+});
+
+test('report and roadmap handoff contracts preserve traceability fields', () => {
+  const report: AuditReportContract = {
+    success: true,
+    auditId: '57f2df69-32c4-4204-8311-3e369c9261b9',
+    targetRoleId: 'frontend-engineer',
+    targetRole: 'Frontend Engineer',
+    overallScore: 82,
+    readinessStatus: 'Nearly Ready',
+    hiringBenchmark: 85,
+    distanceFromBenchmark: 3,
+    dimensionScores: {
+      careerClarity: 80,
+      technicalReadiness: 84,
+      projectReadiness: 82,
+      communication: 78,
+      placementReadiness: 80,
+      executionReadiness: 86,
+    },
+    diagnosisSummary: 'Strong React evidence with a testing gap.',
+    whyRoleFits: ['Demonstrated production React experience.'],
+    strengths: [{
+      skillId: 'react',
+      skillName: 'React',
+      demonstratedScore: 88,
+      evidence: 'Built and shipped a React dashboard.',
+      confidenceScore: 91,
+      whyItMatters: 'React is a core role competency.',
+    }],
+    gaps: [{
+      gapId: 'gap-testing',
+      skillId: 'testing',
+      skillName: 'Testing',
+      expectedScore: 80,
+      demonstratedScore: 50,
+      gap: 30,
+      priorityWeight: 0.8,
+      weightedGap: 24,
+      priority: 'High',
+      evidenceIds: ['evidence-2'],
+      signalIds: ['signal-2'],
+      evidenceBasis: 'Only basic unit-test evidence was provided.',
+      recommendedAction: 'Build a tested API feature',
+      mappingStatus: 'UNMAPPED',
+      recommendedStageIds: [],
+    }],
+    evidenceLedger: [{
+      skillId: 'testing',
+      skillName: 'Testing',
+      observedEvidence: ['Basic unit tests'],
+      missingEvidence: ['Integration tests'],
+      weakEvidence: [],
+      contradictoryEvidence: [],
+    }],
+    priorityRecommendations: [{
+      recommendationId: 'recommendation-testing',
+      gapId: 'gap-testing',
+      rank: 1,
+      recommendedAction: 'Build a tested API feature',
+      reason: 'Gap is traceable to the benchmark and persisted evidence.',
+      mappingStatus: 'UNMAPPED',
+      recommendedStageIds: [],
+    }],
+    diagnosticConclusions: [{
+      id: 'testing',
+      skillName: 'Testing',
+      studentAnswerSnippet: 'I wrote a few unit tests.',
+      evidenceVerified: 'Weak evidence from typed probe',
+      evidenceStrength: 'Weak',
+      score: 50,
+      confidenceScore: 72,
+      confidenceLevel: 'Medium',
+      gapSeverity: 'ORANGE',
+      gapDescription: 'Testing is below the hiring benchmark.',
+      recommendedAction: 'Build a tested API feature',
+    }],
+  };
+
+  const handoff: RoadmapHandoffContract = {
+    contract: 'career-audit-roadmap-contract:v1',
+    auditId: report.auditId,
+    studentId: 'c01afcf5-22a5-49f2-9fe0-2a739bbfaec4',
+    targetRoleId: report.targetRoleId,
+    readinessScore: report.overallScore,
+    priorityGaps: [{
+      gapId: 'gap-testing',
+      skillId: report.gaps[0].skillId,
+      skillName: report.gaps[0].skillName,
+      expectedScore: report.gaps[0].expectedScore,
+      demonstratedScore: report.gaps[0].demonstratedScore,
+      gapScore: report.gaps[0].gap,
+      priority: report.gaps[0].priority,
+      mappingStatus: report.priorityRecommendations[0].mappingStatus,
+      recommendedStageIds: [],
+      evidenceIds: report.gaps[0].evidenceIds,
+    }],
+  };
+
+  assert.equal(report.gaps[0].evidenceIds[0], 'evidence-2');
+  assert.equal(handoff.contract, 'career-audit-roadmap-contract:v1');
+  assert.equal(handoff.targetRoleId, report.targetRoleId);
+  assert.equal(handoff.priorityGaps[0].mappingStatus, 'UNMAPPED');
+  assert.equal(handoff.priorityGaps[0].evidenceIds[0], 'evidence-2');
 });
 
 test('role fit changes with student evidence instead of card position', () => {

@@ -1,3 +1,4 @@
+-- Version reconciled to the connected project's UTC migration history.
 begin;
 
 -- Extend the existing role benchmark model to cover every readiness dimension.

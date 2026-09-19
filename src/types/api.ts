@@ -1,8 +1,8 @@
 import type {
-  DimensionScores,
   EvidenceStrength,
   GapPriority,
-  ReadinessStatus,
+  AuditReportContract,
+  RoadmapHandoffContract,
   SkillSignalInput,
 } from '../domain/careerAudit';
 
@@ -123,63 +123,6 @@ export interface EvidenceLedgerItem {
   contradictoryEvidence: string[];
 }
 
-export interface CareerAuditReportResponse {
-  success: true;
-  auditId: string;
-  targetRoleId: string;
-  targetRole: string;
-  overallScore: number;
-  readinessStatus: ReadinessStatus;
-  hiringBenchmark: number;
-  distanceFromBenchmark: number;
-  dimensionScores: DimensionScores;
-  diagnosisSummary: string;
-  whyRoleFits: string[];
-  strengths: AuditStrengthResponse[];
-  gaps: AuditSkillGapResponse[];
-  evidenceLedger: EvidenceLedgerItem[];
-  priorityRecommendations: Array<{
-    recommendationId: string;
-    gapId: string;
-    rank: number;
-    recommendedAction: string;
-    reason: string;
-    mappingStatus: 'MAPPED' | 'UNMAPPED';
-    pathwisseSkillId?: string;
-    recommendedStageIds: string[];
-  }>;
-  diagnosticConclusions: Array<{
-    id: string;
-    skillName: string;
-    studentAnswerSnippet: string;
-    evidenceVerified: string;
-    evidenceStrength: EvidenceStrength;
-    score: number;
-    confidenceScore: number;
-    confidenceLevel: 'High' | 'Medium' | 'Low';
-    gapSeverity: 'RED' | 'ORANGE' | 'GREEN';
-    gapDescription: string;
-    recommendedAction: string;
-  }>;
-}
+export type CareerAuditReportResponse = AuditReportContract;
 
-export interface CareerAuditRoadmapHandoffV1 {
-  contract: 'career-audit-roadmap-contract:v1';
-  auditId: string;
-  studentId: string;
-  targetRoleId: string;
-  readinessScore: number;
-  priorityGaps: Array<{
-    gapId: string;
-    skillId: string;
-    skillName: string;
-    expectedScore: number;
-    demonstratedScore: number;
-    gapScore: number;
-    priority: GapPriority;
-    mappingStatus: 'MAPPED' | 'UNMAPPED';
-    recommendedPathwisseSkillId?: string;
-    recommendedStageIds: string[];
-    evidenceIds: string[];
-  }>;
-}
+export type CareerAuditRoadmapHandoffV1 = RoadmapHandoffContract;

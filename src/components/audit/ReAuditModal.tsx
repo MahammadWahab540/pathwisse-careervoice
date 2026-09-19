@@ -1,18 +1,13 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { QalamCharacter } from '../qalam/QalamCharacter';
 import { CareerRoleTarget, RoadmapWeek, CareerAuditResult } from '../../types';
 import {
   RotateCcw,
   CheckCircle2,
-  Sparkles,
   Link,
   FileCode,
-  ArrowRight,
   X,
-  Loader2,
-  TrendingUp,
-  Award,
+  LockKeyhole,
 } from 'lucide-react';
 
 interface ReAuditModalProps {
@@ -28,16 +23,11 @@ interface ReAuditModalProps {
 export const ReAuditModal: React.FC<ReAuditModalProps> = ({
   isOpen,
   onClose,
-  role,
   roadmap,
-  previousResult,
-  onReAuditComplete,
-  trackEvent,
 }) => {
   const [completedTopics, setCompletedTopics] = useState<string[]>([]);
   const [newProjectUrl, setNewProjectUrl] = useState('');
   const [newEvidenceNote, setNewEvidenceNote] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -45,77 +35,6 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
     setCompletedTopics((prev) =>
       prev.includes(topicName) ? prev.filter((t) => t !== topicName) : [...prev, topicName]
     );
-  };
-
-  const handleRunReAudit = async () => {
-    setIsSubmitting(true);
-    trackEvent('re_audit_initiated', {
-      completedCount: completedTopics.length,
-      hasProjectUrl: !!newProjectUrl,
-    });
-
-    try {
-      const res = await fetch('/api/qalam/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetRole: role.title,
-          studentContext: { reAudit: true },
-          conversationHistory: [],
-          evidenceData: {
-            gitHubUrl: newProjectUrl,
-            progressNotes: newEvidenceNote,
-          },
-          isReAudit: true,
-          completedMilestones: completedTopics,
-        }),
-      });
-
-      const data = await res.json();
-      setIsSubmitting(false);
-
-      const calculatedScore = Math.min(
-        95,
-        (previousResult.overallScore || 44) + Math.min(35, completedTopics.length * 6 + (newProjectUrl ? 15 : 5))
-      );
-
-      const updatedResult: CareerAuditResult = {
-        ...previousResult,
-        overallScore: data.overallScore ? Math.max(data.overallScore, calculatedScore) : calculatedScore,
-        dimensionScores: {
-          careerClarity: Math.min(100, (previousResult.dimensionScores.careerClarity || 60) + 12),
-          technicalReadiness: Math.min(100, (previousResult.dimensionScores.technicalReadiness || 40) + 20),
-          projectReadiness: Math.min(100, (previousResult.dimensionScores.projectReadiness || 30) + 25),
-          communication: Math.min(100, (previousResult.dimensionScores.communication || 55) + 8),
-          placementReadiness: Math.min(100, (previousResult.dimensionScores.placementReadiness || 35) + 22),
-          executionReadiness: Math.min(100, (previousResult.dimensionScores.executionReadiness || 50) + 15),
-        },
-        diagnosisSummary: `Re-audit successful! You resolved critical blockers for ${role.title}. Your practical project proof significantly improved your readiness index.`,
-        diagnosticConclusions: (previousResult.diagnosticConclusions || []).map((c, i) => ({
-          ...c,
-          score: Math.min(95, c.score + 22),
-          confidenceScore: 92,
-          confidenceLevel: 'High' as const,
-          evidenceStrength: 'Strong' as const,
-          gapSeverity: i === 0 ? ('GREEN' as const) : ('ORANGE' as const),
-          evidenceVerified: newProjectUrl ? `Verified project submission: ${newProjectUrl}` : 'Completed milestone verified',
-        })),
-        gaps: previousResult.gaps.map((g, idx) => ({
-          ...g,
-          severity: idx === 0 ? ('GREEN' as const) : ('ORANGE' as const),
-          description: idx === 0 ? 'Resolved: Public proof of work deployed.' : g.description,
-        })),
-        auditIteration: (previousResult.auditIteration || 1) + 1,
-        auditTimestamp: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      };
-
-      onReAuditComplete(updatedResult);
-      onClose();
-    } catch (err) {
-      console.error('Re-audit error:', err);
-      setIsSubmitting(false);
-      onClose();
-    }
   };
 
   return (
@@ -151,6 +70,10 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
         <p className="text-xs text-slate-600 leading-relaxed font-medium">
           Finished any roadmap milestones or created new proof of work? Add it here to refresh your readiness score.
         </p>
+
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+          Re-audit is temporarily unavailable. Start a new career audit to generate a score from newly persisted evidence.
+        </div>
 
         {/* Roadmap Milestones Checkbox List */}
         <div className="space-y-2">
@@ -219,22 +142,11 @@ export const ReAuditModal: React.FC<ReAuditModalProps> = ({
         {/* Submit Re-Audit */}
         <div className="pt-2">
           <button
-            onClick={handleRunReAudit}
-            disabled={isSubmitting}
-            className="w-full py-3.5 px-4 rounded-full bg-[#1f3861] hover:bg-[#182c4d] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+            disabled
+            className="w-full py-3.5 px-4 rounded-full bg-slate-300 text-slate-600 font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 cursor-not-allowed"
           >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Checking your progress...</span>
-              </>
-            ) : (
-              <>
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
-                <span>Refresh my readiness score</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
+            <LockKeyhole className="w-4 h-4" />
+            <span>Start a new audit to refresh your score</span>
           </button>
         </div>
       </motion.div>

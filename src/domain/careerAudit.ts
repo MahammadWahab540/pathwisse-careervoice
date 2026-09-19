@@ -96,6 +96,113 @@ export const READINESS_THRESHOLDS = {
   developing: 45,
 } as const;
 
+
+export interface AuditReportStrength {
+  skillId: string;
+  skillName: string;
+  demonstratedScore: number;
+  evidence: string;
+  confidenceScore: number;
+  whyItMatters: string;
+}
+
+export interface AuditReportGap {
+  gapId: string;
+  skillId: string;
+  skillName: string;
+  expectedScore: number;
+  demonstratedScore: number;
+  gap: number;
+  priorityWeight: number;
+  weightedGap: number;
+  priority: GapPriority;
+  evidenceIds: string[];
+  signalIds: string[];
+  evidenceBasis: string;
+  recommendedAction: string;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  recommendedPathwisseSkillId?: string;
+  recommendedStageIds: string[];
+}
+
+export interface AuditRecommendation {
+  recommendationId: string;
+  gapId: string;
+  rank: number;
+  recommendedAction: string;
+  reason: string;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  pathwisseSkillId?: string;
+  recommendedStageIds: string[];
+}
+
+export interface AuditEvidenceLedgerItem {
+  skillId: string;
+  skillName: string;
+  observedEvidence: string[];
+  missingEvidence: string[];
+  weakEvidence: string[];
+  contradictoryEvidence: string[];
+}
+
+export interface AuditDiagnosticConclusion {
+  id: string;
+  skillName: string;
+  studentAnswerSnippet: string;
+  evidenceVerified: string;
+  evidenceStrength: EvidenceStrength;
+  score: number;
+  confidenceScore: number;
+  confidenceLevel: 'High' | 'Medium' | 'Low';
+  gapSeverity: 'RED' | 'ORANGE' | 'GREEN';
+  gapDescription: string;
+  recommendedAction: string;
+}
+
+/** The exact payload persisted in audit_reports.model_metadata.reportPayload and returned by the finalize API. */
+export interface AuditReportContract {
+  success: true;
+  auditId: string;
+  targetRoleId: string;
+  targetRole: string;
+  overallScore: number;
+  readinessStatus: ReadinessStatus;
+  hiringBenchmark: number;
+  distanceFromBenchmark: number;
+  dimensionScores: DimensionScores;
+  diagnosisSummary: string;
+  whyRoleFits: string[];
+  strengths: AuditReportStrength[];
+  gaps: AuditReportGap[];
+  evidenceLedger: AuditEvidenceLedgerItem[];
+  priorityRecommendations: AuditRecommendation[];
+  diagnosticConclusions: AuditDiagnosticConclusion[];
+}
+
+export interface RoadmapHandoffPriorityGap {
+  gapId: string;
+  skillId: string;
+  skillName: string;
+  expectedScore: number;
+  demonstratedScore: number;
+  gapScore: number;
+  priority: GapPriority;
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
+  recommendedPathwisseSkillId?: string;
+  recommendedStageIds: string[];
+  evidenceIds: string[];
+}
+
+/** The exact v1 payload persisted in audit_reports.personalised_roadmap. */
+export interface RoadmapHandoffContract {
+  contract: 'career-audit-roadmap-contract:v1';
+  auditId: string;
+  studentId: string;
+  targetRoleId: string;
+  readinessScore: number;
+  priorityGaps: RoadmapHandoffPriorityGap[];
+}
+
 export interface RoleFitProfile {
   careerIntent: string;
   branch: string;
@@ -419,7 +526,7 @@ export function calculateSkillGap(
   };
 }
 
-export function calculateOverallReadiness(
+export function calculateReadiness(
   dimensions: DimensionScores,
   weights: ReadinessWeights = DEFAULT_READINESS_WEIGHTS
 ): number {
@@ -434,6 +541,8 @@ export function calculateOverallReadiness(
 
   return Math.round(weighted / totalWeight);
 }
+
+export const calculateOverallReadiness = calculateReadiness;
 
 function tokenize(value: string): Set<string> {
   return new Set(

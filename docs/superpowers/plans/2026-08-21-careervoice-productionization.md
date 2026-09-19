@@ -42,7 +42,7 @@
 ### Task 2: Supabase normalized lineage migration
 
 **Files:**
-- Create: `supabase/migrations/20260821213000_career_voice_evidence_scoring.sql`
+- Create: `supabase/migrations/20260821160033_career_voice_evidence_scoring.sql`
 - Create: `scripts/validate-career-voice-mappings.sql`
 
 **Interfaces:**

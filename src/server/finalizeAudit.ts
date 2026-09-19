@@ -19,7 +19,7 @@ import type {
   EvidenceLedgerItem,
 } from '../types/api';
 import { serverConfig } from './config';
-import { generateStructuredJson } from './gemini';
+import { AiResponseValidationError, AiUnavailableError, generateStructuredJson } from './gemini';
 import {
   getAuditSession,
   loadAuditEvidence,
@@ -40,6 +40,38 @@ export class AuditFinalizationError extends Error {
     this.name = 'AuditFinalizationError';
     this.code = code;
     this.status = status;
+  }
+}
+
+export interface FinalizationDependencies {
+  generateStructuredJson: typeof generateStructuredJson;
+}
+
+const defaultFinalizationDependencies: FinalizationDependencies = {
+  generateStructuredJson,
+};
+
+function throwAiGenerationError(error: unknown, phase: 'classification' | 'explanation'): never {
+  if (error instanceof AiUnavailableError) {
+    throw new AuditFinalizationError('AI_UNAVAILABLE', error.message, 503);
+  }
+  throw new AuditFinalizationError(
+    'AI_RESPONSE_INVALID',
+    error instanceof Error
+      ? `AI ${phase} response is invalid: ${error.message}`
+      : `AI ${phase} response is invalid.`,
+    502
+  );
+}
+
+function validateAiResponse<T>(validator: () => T): T {
+  try {
+    return validator();
+  } catch (error) {
+    if (error instanceof AiResponseValidationError) throw error;
+    throw new AiResponseValidationError(
+      error instanceof Error ? error.message : 'AI structured response is invalid.'
+    );
   }
 }
 
@@ -155,11 +187,14 @@ function validateClassification(
   }
 
   const competencyById = new Map(competencies.map((item) => [item.skillId, item]));
+  const seenCompetencyIds = new Set<string>();
   const competencySignals = value.competencySignals.map((entry, index): ClassificationItem => {
     if (!isRecord(entry)) throw new Error(`competencySignals[${index}] is invalid`);
     const skillId = readString(entry.skillId, `competencySignals[${index}].skillId`);
     const competency = competencyById.get(skillId);
     if (!competency) throw new Error(`Unknown competency skillId ${skillId}`);
+    if (seenCompetencyIds.has(skillId)) throw new Error(`Duplicate competency skillId ${skillId}`);
+    seenCompetencyIds.add(skillId);
     const evidenceId = readString(entry.evidenceId, `competencySignals[${index}].evidenceId`);
     if (!evidenceIds.has(evidenceId)) throw new Error(`Unknown evidenceId ${evidenceId}`);
     return {
@@ -173,9 +208,8 @@ function validateClassification(
     };
   });
 
-  const seenSkillIds = new Set(competencySignals.map((item) => item.skillId));
   for (const competency of competencies) {
-    if (!seenSkillIds.has(competency.skillId)) {
+    if (!seenCompetencyIds.has(competency.skillId)) {
       throw new Error(`Gemini did not classify required competency ${competency.skillId}`);
     }
   }
@@ -187,10 +221,13 @@ function validateClassification(
     'placementReadiness',
     'executionReadiness',
   ]);
+  const seenDimensions = new Set<string>();
   const dimensionSignals = value.dimensionSignals.map((entry, index): DimensionClassification => {
     if (!isRecord(entry)) throw new Error(`dimensionSignals[${index}] is invalid`);
     const dimension = readString(entry.dimension, `dimensionSignals[${index}].dimension`);
     if (!allowedDimensions.has(dimension)) throw new Error(`Unknown dimension ${dimension}`);
+    if (seenDimensions.has(dimension)) throw new Error(`Duplicate dimension ${dimension}`);
+    seenDimensions.add(dimension);
     const evidenceId = readString(entry.evidenceId, `dimensionSignals[${index}].evidenceId`);
     if (!evidenceIds.has(evidenceId)) throw new Error(`Unknown dimension evidenceId ${evidenceId}`);
     return {
@@ -203,7 +240,7 @@ function validateClassification(
   });
 
   for (const dimension of allowedDimensions) {
-    if (!dimensionSignals.some((item) => item.dimension === dimension)) {
+    if (!seenDimensions.has(dimension)) {
       throw new Error(`Gemini did not classify required dimension ${dimension}`);
     }
   }
@@ -217,10 +254,13 @@ function validateExplanation(value: unknown, skillIds: Set<string>): Explanation
   }
   const diagnosisSummary = readString(value.diagnosisSummary, 'diagnosisSummary');
   const whyRoleFits = value.whyRoleFits.map((item, index) => readString(item, `whyRoleFits[${index}]`));
+  const seenSkillIds = new Set<string>();
   const skillExplanations = value.skillExplanations.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`skillExplanations[${index}] is invalid`);
     const skillId = readString(entry.skillId, `skillExplanations[${index}].skillId`);
     if (!skillIds.has(skillId)) throw new Error(`Unknown explanation skillId ${skillId}`);
+    if (seenSkillIds.has(skillId)) throw new Error(`Duplicate explanation skillId ${skillId}`);
+    seenSkillIds.add(skillId);
     return {
       skillId,
       whyItMatters: readString(entry.whyItMatters, `skillExplanations[${index}].whyItMatters`),
@@ -228,9 +268,8 @@ function validateExplanation(value: unknown, skillIds: Set<string>): Explanation
       reason: readString(entry.reason, `skillExplanations[${index}].reason`),
     };
   });
-  const seen = new Set(skillExplanations.map((item) => item.skillId));
   for (const skillId of skillIds) {
-    if (!seen.has(skillId)) throw new Error(`Gemini explanation missing skillId ${skillId}`);
+    if (!seenSkillIds.has(skillId)) throw new Error(`Gemini explanation missing skillId ${skillId}`);
   }
   return { diagnosisSummary, whyRoleFits, skillExplanations };
 }
@@ -339,7 +378,7 @@ function signalLevelForLegacy(level: string): string {
   return 'Beginner';
 }
 
-async function persistFinalClassification(
+export async function persistFinalClassification(
   supabase: SupabaseClient,
   input: {
     auditId: string;
@@ -351,50 +390,98 @@ async function persistFinalClassification(
   }
 ): Promise<string> {
   const idempotencyKey = `finalize:${input.auditId}:${input.competency.skillId}`;
+  const isDemonstrated = input.classification.evidenceStrength === 'Strong' || input.classification.evidenceStrength === 'Moderate';
+  const signalPayload = {
+    session_id: input.auditId,
+    user_id: input.studentId,
+    role_id: input.roleId,
+    skill_slug: input.competency.skillSlug,
+    skill_name: input.competency.skillName,
+    level: signalLevelForLegacy(input.classification.extractedLevel),
+    score: null,
+    confidence: input.classification.confidenceScore / 100,
+    source_message_id: input.evidence.source_message_id || null,
+    idempotency_key: idempotencyKey,
+    evidence_summary: input.evidence.raw_text || '',
+    evidence_id: input.evidence.id,
+    claimed_level: input.evidence.claimed_level || null,
+    extracted_level: input.classification.extractedLevel,
+    confidence_score: input.classification.confidenceScore,
+    evidence_strength: input.classification.evidenceStrength,
+    raw_answer_snippet: input.evidence.raw_text || '',
+    source: input.evidence.source || 'document',
+    contract_version: isDemonstrated ? 'career-audit:v1' : 'legacy',
+    metadata: {
+      classifier: serverConfig.openrouterConfigured ? 'openrouter-http' : 'gemini-http',
+      classifierModel: serverConfig.openrouterConfigured ? serverConfig.openrouterLlmModel : serverConfig.geminiEvaluationModel,
+      competencySkillId: input.competency.skillId,
+      contradictory: input.classification.contradictory,
+    },
+  };
   const existing = await supabase
     .from('audit_skill_signals')
     .select('id')
     .eq('idempotency_key', idempotencyKey)
     .maybeSingle();
   if (existing.error) throw new PersistenceError('final_signal_lookup', existing.error.message);
-  if (existing.data?.id) return existing.data.id as string;
-  const isDemonstrated = input.classification.evidenceStrength === 'Strong' || input.classification.evidenceStrength === 'Moderate';
+  if (existing.data?.id) {
+    const existingId = existing.data.id as string;
+    const updated = await supabase
+      .from('audit_skill_signals')
+      .update(signalPayload)
+      .eq('id', existingId);
+    if (updated.error) throw new PersistenceError('final_signal_update', updated.error.message);
+    return existingId;
+  }
 
   const inserted = await supabase
     .from('audit_skill_signals')
-    .insert({
-      session_id: input.auditId,
-      user_id: input.studentId,
-      role_id: input.roleId,
-      skill_slug: input.competency.skillSlug,
-      skill_name: input.competency.skillName,
-      level: signalLevelForLegacy(input.classification.extractedLevel),
-      score: null,
-      confidence: input.classification.confidenceScore / 100,
-      source_message_id: input.evidence.source_message_id || null,
-      idempotency_key: idempotencyKey,
-      evidence_summary: input.evidence.raw_text || '',
-      evidence_id: input.evidence.id,
-      claimed_level: input.evidence.claimed_level || null,
-      extracted_level: input.classification.extractedLevel,
-      confidence_score: input.classification.confidenceScore,
-      evidence_strength: input.classification.evidenceStrength,
-      raw_answer_snippet: input.evidence.raw_text || '',
-      source: input.evidence.source || 'document',
-      contract_version: isDemonstrated ? 'career-audit:v1' : 'legacy',
-      metadata: {
-        classifier: serverConfig.openrouterConfigured ? 'openrouter-http' : 'gemini-http',
-        classifierModel: serverConfig.openrouterConfigured ? serverConfig.openrouterLlmModel : serverConfig.geminiEvaluationModel,
-        competencySkillId: input.competency.skillId,
-        contradictory: input.classification.contradictory,
-      },
-    })
+    .insert(signalPayload)
     .select('id')
     .single();
   if (inserted.error || !inserted.data) {
+    if (inserted.error?.code === '23505') {
+      const concurrent = await supabase
+        .from('audit_skill_signals')
+        .select('id')
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle();
+      if (concurrent.error) {
+        throw new PersistenceError('final_signal_conflict_lookup', concurrent.error.message);
+      }
+      if (concurrent.data?.id) {
+        const concurrentId = concurrent.data.id as string;
+        const updated = await supabase
+          .from('audit_skill_signals')
+          .update(signalPayload)
+          .eq('id', concurrentId);
+        if (updated.error) throw new PersistenceError('final_signal_conflict_update', updated.error.message);
+        return concurrentId;
+      }
+    }
     throw new PersistenceError('final_signal_insert', inserted.error?.message || 'Signal insert failed.');
   }
   return inserted.data.id as string;
+}
+
+export async function pruneStaleAuditRecommendations(
+  supabase: SupabaseClient,
+  auditId: string,
+  currentGapIds: string[]
+): Promise<void> {
+  let deletion = supabase
+    .from('audit_recommendations')
+    .delete()
+    .eq('session_id', auditId);
+
+  if (currentGapIds.length > 0) {
+    deletion = deletion.not('gap_id', 'in', `(${currentGapIds.join(',')})`);
+  }
+
+  const result = await deletion;
+  if (result.error) {
+    throw new PersistenceError('audit_recommendation_prune', result.error.message);
+  }
 }
 
 async function upsertScoreAndGap(
@@ -493,69 +580,10 @@ export async function getPersistedHandoff(
   return payload && isRecord(payload) ? (payload as unknown as CareerAuditRoadmapHandoffV1) : null;
 }
 
-function fallbackClassification(
-  competencies: CompetencyRecord[],
-  evidenceRows: EvidenceRow[]
-): ClassificationPayload {
-  const firstEvidenceId = evidenceRows[0]?.id || '';
-  const competencySignals: ClassificationItem[] = competencies.map((competency) => {
-    const keywords = competency.skillName.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-    const matchedEvidence = evidenceRows.find((e) => {
-      const text = (e.raw_text || '').toLowerCase();
-      return keywords.some((k) => text.includes(k));
-    }) || evidenceRows[0];
-
-    const hasMatch = keywords.some((k) => (matchedEvidence?.raw_text || '').toLowerCase().includes(k));
-    const evidenceLength = (matchedEvidence?.raw_text || '').length;
-
-    return {
-      skillId: competency.skillId,
-      skillName: competency.skillName,
-      evidenceId: matchedEvidence?.id || firstEvidenceId,
-      evidenceStrength: (hasMatch ? (evidenceLength > 80 ? 'Moderate' : 'Weak') : 'None') as EvidenceStrength,
-      extractedLevel: hasMatch ? (evidenceLength > 80 ? 'Intermediate' : 'Beginner') : 'Novice',
-      confidenceScore: hasMatch ? (evidenceLength > 80 ? 65 : 45) : 30,
-      contradictory: false,
-    };
-  });
-
-  const dimensionSignals: DimensionClassification[] = [
-    { dimension: 'careerClarity', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 65 },
-    { dimension: 'projectReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Weak', extractedLevel: 'Beginner', confidenceScore: 50 },
-    { dimension: 'communication', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 60 },
-    { dimension: 'placementReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Weak', extractedLevel: 'Beginner', confidenceScore: 45 },
-    { dimension: 'executionReadiness', evidenceId: firstEvidenceId, evidenceStrength: 'Moderate', extractedLevel: 'Intermediate', confidenceScore: 55 },
-  ];
-
-  return { competencySignals, dimensionSignals };
-}
-
-function fallbackExplanation(
-  roleTitle: string,
-  competencies: CompetencyRecord[],
-  overallScore: number,
-  readinessStatus: string,
-  hiringBenchmark: number
-): ExplanationPayload {
-  return {
-    diagnosisSummary: `Career audit completed for ${roleTitle}. Overall readiness score is ${overallScore}/100 against hiring benchmark ${hiringBenchmark}. Status is ${readinessStatus}.`,
-    whyRoleFits: [
-      `${roleTitle} aligns with your indicated technical domain and career direction.`,
-      'Demonstrated foundational awareness in core track competencies.',
-      'Targeted portfolio proof will accelerate your placement readiness.',
-    ],
-    skillExplanations: competencies.map((c) => ({
-      skillId: c.skillId,
-      whyItMatters: `${c.skillName} is a high-impact benchmark competency expected for ${roleTitle}.`,
-      recommendedAction: `Build a concrete portfolio artifact or case study demonstrating ${c.skillName}.`,
-      reason: `${c.skillName} demonstrates practical technical capability for hiring teams.`,
-    })),
-  };
-}
-
 export async function finalizeCareerAudit(
   supabase: SupabaseClient,
-  auditId: string
+  auditId: string,
+  dependencies: FinalizationDependencies = defaultFinalizationDependencies
 ): Promise<CareerAuditReportResponse> {
   const existing = await getPersistedReport(supabase, auditId);
   if (existing) return existing;
@@ -597,36 +625,26 @@ export async function finalizeCareerAudit(
 
   let classification: ClassificationPayload;
   try {
-    classification = await generateStructuredJson<ClassificationPayload>({
+    classification = await dependencies.generateStructuredJson<ClassificationPayload>({
       model: serverConfig.geminiEvaluationModel,
       systemInstruction:
         'You are the evidence-classification layer for Pathwisse CareerVoice. Classify only what the persisted evidence demonstrates. Never calculate readiness scores, gaps, priorities, or recommendations. For every competency and every requested dimension choose the single most relevant supplied evidenceId. If the evidence does not demonstrate the competency, use evidenceStrength None with a conservative proficiency level. Do not invent evidence or identifiers.',
       prompt: `Classify this immutable audit evidence against the exact benchmark. Return exactly one competencySignals item per competency and one dimensionSignals item for each of careerClarity, projectReadiness, communication, placementReadiness, executionReadiness.\n${JSON.stringify(classifierInput)}`,
       responseSchema: classificationSchema(),
-      validate: (value) => validateClassification(value, competencies, evidenceIds),
+      validate: (value) => validateAiResponse(() => validateClassification(value, competencies, evidenceIds)),
     });
   } catch (err) {
-    console.warn('ai_classification_fallback_triggered', err instanceof Error ? err.message : err);
-    classification = fallbackClassification(competencies, usableEvidence);
+    throwAiGenerationError(err, 'classification');
   }
 
   const evidenceById = new Map(usableEvidence.map((item) => [item.id, item]));
-  const scoreRecords = await Promise.all(
-    competencies.map(async (competency) => {
+  const analyzedRecords = competencies.map((competency) => {
       const classified = classification.competencySignals.find((item) => item.skillId === competency.skillId);
       if (!classified) throw new AuditFinalizationError('AI_RESPONSE_INVALID', `Missing classification for ${competency.skillName}.`, 502);
       const evidence = evidenceById.get(classified.evidenceId);
       if (!evidence) throw new AuditFinalizationError('AI_RESPONSE_INVALID', 'Classification referenced missing evidence.', 502);
-      const signalId = await persistFinalClassification(supabase, {
-        auditId,
-        studentId: session.user_id,
-        roleId: session.target_role_id,
-        competency,
-        classification: classified,
-        evidence,
-      });
       const scoringSignal: ScoringSignal = {
-        id: signalId,
+        id: `pending:${competency.skillId}`,
         skillName: competency.skillName,
         extractedLevel: classified.extractedLevel,
         confidenceScore: classified.confidenceScore,
@@ -634,29 +652,19 @@ export async function finalizeCareerAudit(
         evidenceId: classified.evidenceId,
       };
       const demonstratedScore = scoreSignal(scoringSignal);
-      const persisted = await upsertScoreAndGap(supabase, {
-        auditId,
-        studentId: session.user_id,
-        roleId: session.target_role_id,
-        competency,
-        signalId,
-        evidenceId: classified.evidenceId,
-        confidenceScore: classified.confidenceScore,
-        demonstratedScore,
-      });
       return {
         competency,
         classification: classified,
         evidence,
-        signalId,
-        gapId: persisted.gapId,
         demonstratedScore,
-        gap: persisted.gap,
+        gap: calculateSkillGap(competency, demonstratedScore, {
+          signalIds: [],
+          evidenceIds: [classified.evidenceId],
+        }),
       };
-    })
-  );
+    });
 
-  const demonstratedBySkill = new Map(scoreRecords.map((record) => [record.competency.skillId, record.demonstratedScore]));
+  const demonstratedBySkill = new Map(analyzedRecords.map((record) => [record.competency.skillId, record.demonstratedScore]));
   const dimensionByName = new Map(classification.dimensionSignals.map((item) => [item.dimension, dimensionScore(item)]));
   const dimensionScores: DimensionScores = {
     careerClarity: dimensionByName.get('careerClarity') || 0,
@@ -679,7 +687,7 @@ export async function finalizeCareerAudit(
   const hiringBenchmark = Number(model.minimum_readiness_benchmark || 75);
   const distanceFromBenchmark = Math.max(hiringBenchmark - overallScore, 0);
 
-  const deterministicResults = scoreRecords.map((record) => ({
+  const deterministicResults = analyzedRecords.map((record) => ({
     skillId: record.competency.skillId,
     skillName: record.competency.skillName,
     expectedScore: record.competency.expectedScore,
@@ -695,7 +703,7 @@ export async function finalizeCareerAudit(
 
   let explanation: ExplanationPayload;
   try {
-    explanation = await generateStructuredJson<ExplanationPayload>({
+    explanation = await dependencies.generateStructuredJson<ExplanationPayload>({
       model: serverConfig.geminiEvaluationModel,
       systemInstruction:
         'You are the explanation layer for Pathwisse CareerVoice. The supplied scores, gaps, priorities and benchmark are immutable deterministic results. Explain them using only the supplied evidence. Do not output or alter any numeric score. For each supplied skillId provide a concrete recommendedAction and a traceable reason. Avoid motivational filler.',
@@ -708,12 +716,42 @@ export async function finalizeCareerAudit(
         deterministicResults,
       })}`,
       responseSchema: explanationSchema(),
-      validate: (value) => validateExplanation(value, new Set(competencies.map((item) => item.skillId))),
+      validate: (value) => validateAiResponse(
+        () => validateExplanation(value, new Set(competencies.map((item) => item.skillId)))
+      ),
     });
   } catch (err) {
-    console.warn('ai_explanation_fallback_triggered', err instanceof Error ? err.message : err);
-    explanation = fallbackExplanation(role.title, competencies, overallScore, readinessStatus, hiringBenchmark);
+    throwAiGenerationError(err, 'explanation');
   }
+
+  const scoreRecords = await Promise.all(
+    analyzedRecords.map(async (record) => {
+      const signalId = await persistFinalClassification(supabase, {
+        auditId,
+        studentId: session.user_id,
+        roleId: session.target_role_id,
+        competency: record.competency,
+        classification: record.classification,
+        evidence: record.evidence,
+      });
+      const persisted = await upsertScoreAndGap(supabase, {
+        auditId,
+        studentId: session.user_id,
+        roleId: session.target_role_id,
+        competency: record.competency,
+        signalId,
+        evidenceId: record.classification.evidenceId,
+        confidenceScore: record.classification.confidenceScore,
+        demonstratedScore: record.demonstratedScore,
+      });
+      return {
+        ...record,
+        signalId,
+        gapId: persisted.gapId,
+        gap: persisted.gap,
+      };
+    })
+  );
 
   const explanationBySkill = new Map(explanation.skillExplanations.map((item) => [item.skillId, item]));
   const mappingBySlug = new Map(mappings.map((item) => [String(item.career_voice_skill_slug), item]));
@@ -806,6 +844,12 @@ export async function finalizeCareerAudit(
     });
     rank += 1;
   }
+
+  await pruneStaleAuditRecommendations(
+    supabase,
+    auditId,
+    recommendationRows.map((recommendation) => recommendation.gapId)
+  );
 
   const diagnosticConclusions: CareerAuditReportResponse['diagnosticConclusions'] = sortedRecords.map((record) => {
     const explanationItem = explanationBySkill.get(record.competency.skillId)!;
