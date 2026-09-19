@@ -13,8 +13,6 @@ import {
   Mic,
   FileText,
   ChevronDown,
-  GraduationCap,
-  Building2,
 } from 'lucide-react';
 import { requestOtp, verifyOtp, requestEmailOtp, verifyEmailOtp } from '../../api/auth';
 import { getBrowserSupabase } from '../../lib/supabaseBrowser';
@@ -241,24 +239,6 @@ export const AuthStep: React.FC<AuthStepProps> = ({
     }
   };
 
-  // Quick Demo Access Handler
-  const handleQuickDemoAccess = (role: UserRole) => {
-    const demoId = role === 'college' ? 'demo_placement_officer' : 'demo_student_candidate';
-    const demoPhone = role === 'college' ? '+919876500001' : '+919876500002';
-    trackEvent?.('auth_demo_access', { role });
-    onAuthenticated(
-      {
-        phone: demoPhone,
-        countryCode: '+91',
-        isOtpVerified: true,
-        studentId: demoId,
-        anonymousId: crypto.randomUUID(),
-        sessionId: crypto.randomUUID(),
-      },
-      role
-    );
-  };
-
   return (
     <div className="min-h-screen w-full bg-[#f8fafc] text-[#0b111d] flex flex-col items-center justify-center p-3 sm:p-5 lg:p-7 selection:bg-[#ea580c] selection:text-white font-sans">
       {/* Centered Main Layout Shell */}
@@ -288,30 +268,8 @@ export const AuthStep: React.FC<AuthStepProps> = ({
             </div>
           </div>
 
-          {/* Right Header: Learn More + Demo Shortcuts */}
+          {/* Right Header: Learn More */}
           <div className="flex items-center gap-3 sm:gap-4">
-            {/* Quick Demo Shortcuts */}
-            <div className="hidden md:flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickDemoAccess('student')}
-                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-orange-50 hover:border-orange-200 text-[11px] font-semibold text-slate-600 hover:text-[#ea580c] transition cursor-pointer flex items-center gap-1.5"
-                title="Quick preview as candidate student"
-              >
-                <GraduationCap className="w-3.5 h-3.5 text-slate-500" />
-                <span>Demo Student</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickDemoAccess('college')}
-                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-orange-50 hover:border-orange-200 text-[11px] font-semibold text-slate-600 hover:text-[#ea580c] transition cursor-pointer flex items-center gap-1.5"
-                title="Quick preview as placement officer"
-              >
-                <Building2 className="w-3.5 h-3.5 text-slate-500" />
-                <span>Demo Placement</span>
-              </button>
-            </div>
-
             <div className="text-xs font-medium text-[#64748b] flex items-center gap-1">
               <span className="hidden sm:inline">New here?</span>
               <a
