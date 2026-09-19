@@ -5,15 +5,22 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://pfzjbazocmgflcogjjrg.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmempiYXpvY21nZmxjb2dqanJnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzMwNTM4NywiZXhwIjoyMTAyODgxMzg3fQ.tfCZ-4ONaeHQOKovP2l2EyzDwZaLtp85VUgK0-MWYV4';
-const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_5IxIvt5Ba8m-AFbAnwZXDQ_8jyx9qPX';
+const supabaseUrl = process.env.SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const liveAuthTestsEnabled =
+  process.env.CAREERVOICE_LIVE_AUTH_TESTS === 'true' &&
+  Boolean(supabaseUrl && serviceRoleKey && anonKey);
+const liveTest = liveAuthTestsEnabled ? test : test.skip;
+const clientUrl = supabaseUrl || 'http://127.0.0.1:54321';
+const clientServiceRoleKey = serviceRoleKey || 'not-configured';
+const clientAnonKey = anonKey || 'not-configured';
 
-const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+const adminClient = createClient(clientUrl, clientServiceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-const anonClient = createClient(supabaseUrl, anonKey, {
+const anonClient = createClient(clientUrl, clientAnonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -37,7 +44,7 @@ async function bridgeCustomOtpSession(userId: string, email: string) {
   return sessionRes.data.session;
 }
 
-test('Test 1: New user flow creates user, generates legitimate Supabase session with access & refresh tokens', async () => {
+liveTest('Test 1: New user flow creates user, generates legitimate Supabase session with access & refresh tokens', async () => {
   const testPhone = `+9199${Math.floor(10000000 + Math.random() * 90000000)}`;
   const testEmail = `test_${Date.now()}_${Math.floor(Math.random() * 1000)}@careervoice.internal`;
 
@@ -66,7 +73,7 @@ test('Test 1: New user flow creates user, generates legitimate Supabase session 
   }
 });
 
-test('Test 2: Existing user flow generates new valid session without duplicate auth.users', async () => {
+liveTest('Test 2: Existing user flow generates new valid session without duplicate auth.users', async () => {
   const testPhone = `+9198${Math.floor(10000000 + Math.random() * 90000000)}`;
   const testEmail = `test_existing_${Date.now()}@careervoice.internal`;
 
@@ -98,7 +105,7 @@ test('Test 2: Existing user flow generates new valid session without duplicate a
   }
 });
 
-test('Test 3: Invalid OTP token hash fails verification and creates no session', async () => {
+liveTest('Test 3: Invalid OTP token hash fails verification and creates no session', async () => {
   const badResult = await anonClient.auth.verifyOtp({
     token_hash: 'invalid_token_hash_00000000000000000000000000000000',
     type: 'magiclink',
@@ -108,7 +115,7 @@ test('Test 3: Invalid OTP token hash fails verification and creates no session',
   assert.equal(badResult.data?.session, null, 'No session should be created on invalid token');
 });
 
-test('Test 4 & 5: Missing or invalid token fails Supabase token verification', async () => {
+liveTest('Test 4 & 5: Missing or invalid token fails Supabase token verification', async () => {
   // Missing token
   const emptyCheck = await adminClient.auth.getUser('');
   assert.ok(emptyCheck.error, 'Empty access token must return error');
@@ -118,7 +125,7 @@ test('Test 4 & 5: Missing or invalid token fails Supabase token verification', a
   assert.ok(invalidCheck.error, 'Malformed or forged access token must return error');
 });
 
-test('Test 6 & 7: Token refresh succeeds with valid refresh_token', async () => {
+liveTest('Test 6 & 7: Token refresh succeeds with valid refresh_token', async () => {
   const testPhone = `+9197${Math.floor(10000000 + Math.random() * 90000000)}`;
   const testEmail = `test_refresh_${Date.now()}@careervoice.internal`;
 
@@ -150,7 +157,7 @@ test('Test 6 & 7: Token refresh succeeds with valid refresh_token', async () => 
   }
 });
 
-test('Test 8: Logout / session sign-out revokes session', async () => {
+liveTest('Test 8: Logout / session sign-out revokes session', async () => {
   const testEmail = `test_signout_${Date.now()}@careervoice.internal`;
   const created = await adminClient.auth.admin.createUser({
     email: testEmail,
@@ -163,7 +170,7 @@ test('Test 8: Logout / session sign-out revokes session', async () => {
     assert.ok(session.access_token);
 
     // Create a dedicated client to hold and sign out of this session
-    const userClient = createClient(supabaseUrl, anonKey, {
+    const userClient = createClient(clientUrl, clientAnonKey, {
       auth: { persistSession: false },
     });
     await userClient.auth.setSession({
@@ -179,7 +186,7 @@ test('Test 8: Logout / session sign-out revokes session', async () => {
   }
 });
 
-test('Test 9: Exact affected user d0025cd5 resolves canonically, issues session, and preserves audit data', async () => {
+liveTest('Test 9: Exact affected user d0025cd5 resolves canonically, issues session, and preserves audit data', async () => {
   const canonicalUserId = 'd0025cd5-724d-4e33-b593-1c5effe6154a';
   const canonicalPhone = '+919100886544';
 
