@@ -23,12 +23,21 @@ the CareerVoice role and the approved Pathwisse career path.
 Export only published rows and include the stable identifiers and provenance used
 to prove parentage:
 
-1. Career paths: ID, slug, title, role ID, published status, source ID, content version, and checksum.
-2. Roadmap skills: ID, career-path ID, slug, title, published status, source ID, content version, and checksum.
-3. Skill stages: ID, roadmap-skill ID, slug, title, order index, published status, source ID, content version, and checksum.
+1. Career paths: ID, slug, title, published status, and an explicitly reviewed
+   `career_voice_role_id` cross-system binding. The Pathwisse-native role ID must not
+   be treated as a CareerVoice role ID.
+2. Roadmap skills: ID, career-path ID, slug, title, and published status.
+3. Skill stages: ID, roadmap-skill ID, slug, title, order index, and published status.
 
-Record a SHA-256 digest for the complete export using a documented canonical byte
-format. Do not copy service-role keys or other credentials into the repository.
+Wrap the arrays in one JSON object with `source_id`, `content_version`, `paths`,
+`skills`, `stages`, and `content_checksum`. Compute SHA-256 over UTF-8 canonical JSON
+for the object excluding only `content_checksum`: object keys are sorted
+lexicographically and collection order is preserved. Export paths, skills, and stages
+in a stable order before calculating the digest. Obtain the expected digest through a
+separate approved channel; a checksum embedded only in the export is not an authority
+signal. Do not copy service-role keys or other credentials into the repository.
+The validator rejects additional top-level or entity fields so no supplied catalog
+data can sit outside this declared canonical schema.
 
 ## Candidate generation
 
@@ -70,17 +79,20 @@ ordered by `(order_index, id)`.
 
 ## Migration safeguards
 
-### Structural preflight
+### Offline preflight
 
 Run `npm run validate:careervoice-crosswalk-structure -- <manifest.json>
-<published-inventory.json>` before catalog review. This offline preflight validates
-the exact 110-row inventory set, decision-state shape, UUID syntax, score and margin
-gates, compound-label handling, reviewer timestamps, and snapshot provenance fields.
-It deliberately does not claim that supplied Pathwisse IDs exist or have correct
-parentage. A preflight pass is not catalog approval and cannot make Task 2 Done.
+<published-inventory.json> <catalog-snapshot.json> <trusted-catalog-sha256>` before
+migration review. This offline preflight validates the exact 110-row inventory set,
+decision-state shape, UUID syntax, score and margin gates, compound-label handling,
+reviewer timestamps, snapshot provenance, canonical digest, path/skill/stage
+parentage, exact labels, publication state, reviewed role binding, and selected stage
+order. It fails closed when the snapshot or independently trusted checksum is absent.
 
-Authoritative catalog parentage, published status, stage order, and the snapshot
-digest must still be validated against the approved catalog export described above.
+A preflight pass proves internal consistency with the supplied and independently
+pinned export; it does not establish that the export was authorized, that semantic
+matches were correctly chosen, or that human review occurred. Those evidence items
+remain mandatory, so a synthetic test snapshot cannot make Task 2 Done.
 
 Generate the migration with `supabase migration new` after the manifest is reviewed.
 The migration must use fixed reviewed values and update rows by the stable composite
